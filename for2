@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# stage1_image.sh - Debiana Way - forensic image + config collector
+# Usage: as root: CONFIRM=I_AM_OWNER_AND_ACCEPT ./stage1_image.sh /dev/sdX /mnt/storage
+# WARNING: produce image of the entire block device; ensure target has enough free space.
+set -euo pipefail
+IFS=$'\n\t'
+
+TOKEN="I_AM_OWNER_AND_ACCEPT"
+if [ "${CONFIRM:-}" != "${TOKEN}" ]; then
+  echo "ERROR: Must run with confirmation token:"
+  echo "  CONFIRM=${TOKEN} $0 /dev/sdX /mnt/storage"
+  exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: Run as root" >&2
+  exit 2
+fi
+
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <source-block-device> <target-dir>"
+  echo "Example: CONFIRM=${TOKEN} $0 /dev/sda /mnt/storage"
+  exit 3
+fi
+
+SRC="$1"
+TARGET_DIR="$2"
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+OUTDIR="${TARGET_DIR}/forensics-${TS}"
+mkdir -p "${OUTDIR}"
+chmod 700 "${OUTDIR}"
+echo "[*] Output -> ${OUTDIR}"
+
+# Basic sanity checks
+if [ ! -b "${SRC}" ]; then
+  echo "ERROR: source ${SRC} is not a block device" >&2
+  exit 4
+fi
+if [ ! -d "${TARGET_DIR}" ]; then
+  echo "ERROR: target ${TARGET_DIR} does not exist or is not a dir" >&2
+  exit 5
+fi
+
+# Record environment
+echo "source=${SRC}" > "${OUTDIR}/meta.txt"
+echo "timestamp=${TS}" >> "${OUTDIR}/meta.txt"
+uname -a >> "${OUTDIR}/meta.txt" 2>/dev/null || true
+echo "pwd=$(pwd)" >> "${OUTDIR}/meta.txt"
+
+# 1) quick volatile snapshot (small, fast) — try to preserve minimal state
+echo "[*] Collecting quick volatile snapshot..."
+ps auxwwf > "${OUTDIR}/ps.txt" 2>/dev/null || true
+ss -tunap > "${OUTDIR}/ss.txt" 2>/dev/null || true
+lsof -nP > "${OUTDIR}/lsof.txt" 2>/dev/null || true
+dmesg -T > "${OUTDIR}/dmesg.txt" 2>/dev/null || true
+journalctl --no-pager -n 200 -o short-precise > "${OUTDIR}/journal.tail" 2>/dev/null || true
+ip -o addr show > "${OUTDIR}/ip.addr" 2>/dev/null || true
+cat /proc/cmdline > "${OUTDIR}/proc.cmdline" 2>/dev/null || true
+cat /proc/modules > "${OUTDIR}/proc.modules" 2>/dev/null || true
+
+# sync before imaging
+sync
+
+# 2) image the disk (dd -> gzip). adjust bs if needed.
+IMG_BASENAME="$(basename "${SRC}")-${TS}.img.gz"
+IMG_PATH="${OUTDIR}/${IMG_BASENAME}"
+echo "[*] Imaging ${SRC} -> ${IMG_PATH} (this may take long)..."
+# try to show progress with pv if available
+if command -v pv >/dev/null 2>&1; then
+  blocksize=$(blockdev --getsize64 "${SRC}" 2>/dev/null || echo 0)
+  pv -s "${blocksize}" "${SRC}" | gzip -c > "${IMG_PATH}"
+else
+  dd if="${SRC}" bs=4M conv=sync,noerror | gzip -c > "${IMG_PATH}"
+fi
+
+# 3) compute hashes
+echo "[*] Computing sha256 of image..."
+sha256sum "${IMG_PATH}" > "${IMG_PATH}.sha256"
+echo "[*] Computing sha256 of meta and collected files..."
+(find "${OUTDIR}" -type f -not -name '*.sha256' -print0 | xargs -0 sha256sum) > "${OUTDIR}/manifest.sha256" || true
+
+# 4) collect critical configs & package state
+echo "[*] Collecting configs and logs..."
+mkdir -p "${OUTDIR}/configs"
+cp -a /etc/passwd /etc/shadow /etc/group /etc/gshadow "${OUTDIR}/configs/" 2>/dev/null || true
+cp -a /etc/sudoers /etc/sudoers.d "${OUTDIR}/configs/" 2>/dev/null || true
+cp -a /etc/ssh/sshd_config "${OUTDIR}/configs/" 2>/dev/null || true
+cp -a /etc/fstab /etc/crypttab "${OUTDIR}/configs/" 2>/dev/null || true
+cp -a /etc/apt/sources.list* "${OUTDIR}/configs/" 2>/dev/null || true
+cp -a /var/log/auth.log* /var/log/syslog* /var/log/kern.log* "${OUTDIR}/" 2>/dev/null || true
+cp -a /root/.ssh "${OUTDIR}/configs/root-ssh" 2>/dev/null || true
+cp -a /home/*/.ssh "${OUTDIR}/configs/homes-ssh" 2>/dev/null || true
+
+# 5) package database & integrity
+dpkg --get-selections > "${OUTDIR}/dpkg-selections.txt" 2>/dev/null || true
+apt-cache policy > "${OUTDIR}/apt-policy.txt" 2>/dev/null || true
+if command -v debsums >/dev/null 2>&1; then
+  debsums -s > "${OUTDIR}/debsums-changed.txt" 2>/dev/null || true
+else
+  echo "debsums not installed; skip file integrity check" > "${OUTDIR}/debsums-not-installed.txt"
+fi
+
+# 6) record mounts and fstab
+mount > "${OUTDIR}/mounts.txt" 2>/dev/null || true
+cat /etc/mtab > "${OUTDIR}/mtab.txt" 2>/dev/null || true
+
+# 7) wrap up, advise
+sync
+echo "[*] IMAGE DONE: ${IMG_PATH}"
+echo "[*] SHA256: see ${IMG_PATH}.sha256"
+echo "[*] manifest of collected files: ${OUTDIR}/manifest.sha256"
+echo "[*] Keep this image offline and analyze on a separate trusted host."
+cat > "${OUTDIR}/README.txt" <<EOF
+Forensic image created: ${IMG_PATH}
+sha256: see ${IMG_PATH}.sha256
+Meta: ${OUTDIR}/meta.txt
+Collected quick volatile state: ps, ss, lsof, dmesg tail, journal.tail
+Collected configs in ${OUTDIR}/configs
+Next recommended steps:
+  - detach storage, move to isolated analysis host
+  - verify sha256 on analysis host
+  - do not mount the image read-write on the analysis host
+  - use Autopsy/SleuthKit/Plaso/Volatility for analysis
+EOF
+
+echo "[*] DONE. Preserve chain-of-custody. Do not operate on the original disk."
+exit 0
