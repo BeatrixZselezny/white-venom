@@ -1,0 +1,19 @@
+Package: *
+Pin: release a=trixie
+Pin-Priority: 900
+
+Package: *
+Pin: release a=trixie-updates
+Pin-Priority: 800
+
+Package: *
+Pin: release a=trixie-security
+Pin-Priority: 850
+
+Package: *
+Pin: release o=Debian
+Pin-Priority: 700
+
+Package: *
+Pin: release a=unstable
+Pin-Priority: -10
