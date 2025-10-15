@@ -56,3 +56,10 @@ apt-get update
 apt-get upgrade --dry-run
 
 # Ha minden tisztán lefut, és a apt-get upgrade nem próbál systemd-t betolni, akkor kész a tiszta Trixie-ed.
+
+
+# verify_apt_integrity.sh
+
+Helyezd pl. ide:
+/usr/local/sbin/verify_apt_integrity.sh
+
