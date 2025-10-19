@@ -39,6 +39,8 @@ ESSENTIAL_PACKAGES=(
     vim
     git
     ca-certificates
+    binutils
+    patchelf
     gnupg
     build-essential
     apt-transport-https # HTTPS kényszerítéshez szükséges (telepítve a debootstrapban)
