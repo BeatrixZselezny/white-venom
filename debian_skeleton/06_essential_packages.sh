@@ -1,66 +1,90 @@
-# Debian Bootstrap Master Plan — 07_essential_packages.sh Inline Script
+#!/bin/bash
+# branches/06-essential-packages.sh
+# Telepíti az alapvető, minimalista és biztonsági csomagokat (Auditd, AppArmor, iproute2).
+# Minimalizmus: Csak a legszükségesebbek, --no-install-recommends kényszerítve.
+# Author: Beatrix Zelezny 🐱 (Zero Trust Revision by Gemini)
+set -euo pipefail
 
-## 07: essential_packages.sh (inline változat a skeleton.sh-hoz)
-
-```bash
-# 07_essential_packages.sh inline
-
-# Ellenőrzés: root
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Run as root!" >&2
-  exit 1
-fi
-
+# --- KONZISZTENCIA BEÁLLÍTÁSOK ---
 LOGFILE="/var/log/essential_packages.log"
 
-# Lista: alapvető, minimal és biztonságos csomagok
+# Globális log függvényt feltételezünk a tools/common_functions.sh-ból
+log() { echo "$(date +%F' '%T) $*"; }
+
+# Ellenőrzés: root user
+if [ "$(id -u)" -ne 0 ]; then
+    log "[ERROR] Run as root!" >&2
+    exit 1
+fi
+
+# --- TRANZAKCIÓS TISZTÍTÁS (CLEANUP/ROLLBACK) ---
+branch_cleanup() {
+    log "[ALERT] Hiba történt a 06-os ág futása közben (csomagtelepítés). Ellenőrizd a logot: $LOGFILE"
+    # Ez az ág nem ír konfigurációs fájlt, így a rollback a tiszta kilépés a feladata.
+    log "[ALERT] 06-os ág rollback befejezve (nincs konfig fájl visszaállítás)."
+}
+
+# Hiba esetén a rollback funkció meghívása
+trap branch_cleanup ERR
+
+# --- ESSENTIAL CSOMAGOK LISTÁJA (Minimalista és Biztonságos) ---
 ESSENTIAL_PACKAGES=(
-  sudo
-  vim
-  curl
-  wget
-  git
-  ca-certificates
-  gnupg
-  build-essential
-  apt-transport-https
-  lsb-release
-  bash-completion
-  net-tools
-  iproute2
-  iputils-ping
-  rsyslog
-  cron
+    # Hardening alapok: AppArmor/Auditd (későbbi ágakhoz)
+    auditd
+    apparmor
+    apparmor-utils
+    
+    # Hálózati és rendszer alapok (Minimalista IP-kezelés)
+    sudo
+    vim
+    git
+    ca-certificates
+    gnupg
+    build-essential
+    apt-transport-https # HTTPS kényszerítéshez szükséges (telepítve a debootstrapban)
+    iproute2            # Modern hálózati eszköz (ip parancs)
+    
+    # Naplózás/Ütemezés
+    rsyslog
+    cron
 )
+# Megjegyzés: iputils-ping és net-tools eltávolítva a minimalizmus érdekében!
 
-# Telepítés minimálisan, no-recommends
-for pkg in "${ESSENTIAL_PACKAGES[@]}"; do
-  echo "Simulating install of $pkg..." | tee -a "$LOGFILE"
-  apt-get -s install --no-install-recommends "$pkg" | tee -a "$LOGFILE"
-  echo "Installing $pkg..." | tee -a "$LOGFILE"
-  apt-get install -y --no-install-recommends "$pkg"
-done
+log "[ACTION] Csomaglista: ${ESSENTIAL_PACKAGES[*]}"
 
-# Ellenőrzés, mi húzta fel a csomagokat
-for pkg in "${ESSENTIAL_PACKAGES[@]}"; do
-  echo "Dependencies for $pkg:" | tee -a "$LOGFILE"
-  aptitude why "$pkg" | tee -a "$LOGFILE"
-done
+# --- CSOMAGOK TELEPÍTÉSE (Tömegesen, Minimalistán) ---
 
-# Felesleges / orphan csomagok ellenőrzése
-echo "Checking for orphan packages..." | tee -a "$LOGFILE"
-apt autoremove -s | tee -a "$LOGFILE"
-deborphan -a | tee -a "$LOGFILE"
+# 1. Frissítés
+log "[ACTION] APT index frissítése..."
+apt-get update
 
-# Befejezés
-echo "07_essential_packages.sh completed. Logs in $LOGFILE"
-```
+# 2. Tömeges telepítés (--no-install-recommends globálisan is be van állítva)
+log "[ACTION] Esszenciális csomagok telepítése (minimalista módon)."
+# -y: feltételezzük az igent a parancssorból
+apt-get install -y --no-install-recommends "${ESSENTIAL_PACKAGES[@]}"
 
-### Megjegyzések / Direktívák
+# --- UTÓLAGOS AUDIT (Mi húzta fel?) ---
 
-* Minden csomag minimálisan telepítve `--no-install-recommends`. Globális no-recommends szabály már érvényben.
-* Minden telepítés előtt szimuláció (`-s`) fut, logban dokumentálva.
-* `aptitude why` segít megérteni, mely csomag húzta fel a függőségeket.
-* `apt autoremove` és `deborphan` szkript segítségével a felesleges csomagok ellenőrzése.
-* Inline a skeleton.sh-ban, az orchestrator csak a fő scriptet hívja, nincs szükség külön fájlra.
-* Log minden lépésről a `/var/log/essential_packages.log`-ba.
+log "[AUDIT] Függőségi audit a logfájlba ($LOGFILE)..."
+{
+    echo "--- FÜGGŐSÉGEK AUDITÁLÁSA ---"
+    for pkg in "${ESSENTIAL_PACKAGES[@]}"; do
+        echo "Dependencies for $pkg:"
+        # aptitude why - megnézi miért kell a csomag
+        # ha nincs aptitude, apt-cache rdepends is megteszi
+        apt-cache rdepends "$pkg" | head -n 5 || echo "  (apt-cache rdepends hiba)"
+        echo ""
+    done
+    echo "--- DEBORPHAN ELLENŐRZÉS (Felesleges csomagok) ---"
+    # Felesleges / orphan csomagok ellenőrzése (deborphan-t telepíteni kell, de nem muszáj essential csomagnak lennie)
+    if command -v deborphan >/dev/null 2>&1; then
+        deborphan --all-packages
+    else
+        echo "deborphan nincs telepítve, kihagyva."
+    fi
+    echo "--- AUTOREMOVE ELLENŐRZÉS ---"
+    apt autoremove -s
+} >> "$LOGFILE"
+
+log "[DONE] 06-os ág befejezve. Alapvető csomagok telepítve és auditálva. Log: $LOGFILE"
+exit 0
