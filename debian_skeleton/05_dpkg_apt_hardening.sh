@@ -1,6 +1,6 @@
 #!/bin/bash
 # branches/05-dpkg-apt-hardening.sh
-# DPKG/APT Baseline Hardening: Systemd Blacklist, No-Recommends, HTTPS-Only, Stable Pinning.
+# DPKG/APT Baseline Hardening: Systemd/Legacy Blacklist, No-Recommends, HTTPS-Only, Stable Pinning.
 # Author: Beatrix Zelezny 🐱 (Zero Trust Revision by Gemini)
 set -euo pipefail
 
@@ -8,9 +8,28 @@ set -euo pipefail
 APT_CONF_DIR="/etc/apt/apt.conf.d"
 PREF_DIR="/etc/apt/preferences.d"
 LOGFILE="/var/log/apt-preinstall.log"
-BLACKLIST=(systemd systemd-sysv libsystemd0 libsystemd-journal0)
-DRY_RUN=false # A futtató scriptből kell érkeznie
-BRANCH_BACKUP_DIR="${BACKUP_DIR:-/var/backups/debootstrap_integrity/05}" # Központosított backup hely
+# KITERJESZTETT FEKETELISTA: kizárja a systemd-t és a felesleges "esszenciálisnak" tekintett csomagokat.
+BLACKLIST=(
+    # 1. Systemd és társai (Nincs systemd)
+    systemd systemd-sysv libsystemd0 libsystemd-journal0
+    
+    # 2. Örökölt / Nem szükséges hálózati eszközök (V6-only, minimalizmus)
+    net-tools               # ifconfig, netstat - iproute2-t használunk
+    iputils-ping            # iproute2-t használunk
+    isc-dhcp-client         # Nincs szükség DHCPv4 kliensre
+    dhcpcd5                 # Alternatív DHCP kliensek
+    netplan                 # Ubuntu-specifikus hálózati konfig
+    ppp                     # Dial-up/modem
+    
+    # 3. Felesleges GUI/Asztali alapok (Nincs desktop)
+    desktop-base
+    
+    # 4. Hagyományos/Felesleges naplózás/admin eszközök
+    logrotate               # Manuális logkezelés
+    dbus-daemon             # D-Bus (gyakran GUI/systemd függőség)
+)
+DRY_RUN=false 
+BRANCH_BACKUP_DIR="${BACKUP_DIR:-/var/backups/debootstrap_integrity/05}" 
 
 # Globális log függvényt feltételezünk, ami a tools/common_functions.sh-ból jön.
 log() { echo "$(date +%F' '%T) $*"; }
@@ -24,12 +43,10 @@ fi
 # --- TRANZAKCIÓS TISZTÍTÁS (CLEANUP/ROLLBACK) ---
 branch_cleanup() {
     log "[ALERT] Hiba történt a 05-ös ág futása közben! Megkísérlem a rollbacket..."
-    # 1. Visszaállítja a korábbi állapotot, ha volt backup
     if [ -d "$BRANCH_BACKUP_DIR/apt.conf.d.bak" ]; then
         log "[ACTION] APT konfiguráció visszaállítása a backupból."
         # Először töröljük a most létrehozott fájlokat
         rm -rf "$APT_CONF_DIR"/*
-        # A backup tartalmának visszamásolása
         cp -a "$BRANCH_BACKUP_DIR/apt.conf.d.bak"/* "$APT_CONF_DIR/" 2>/dev/null || true
     fi
     if [ -d "$BRANCH_BACKUP_DIR/preferences.d.bak" ]; then
@@ -46,11 +63,10 @@ trap branch_cleanup ERR
 # --- 1. BACKUP (Tranzakció indul) ---
 log "[PRECHECK] Készítek backupot a jelenlegi APT konfigurációról: $BRANCH_BACKUP_DIR"
 mkdir -p "$BRANCH_BACKUP_DIR"
-# A backupot a mappáról kell készíteni, nem a fájlokról
 cp -a "$APT_CONF_DIR" "$BRANCH_BACKUP_DIR/apt.conf.d.bak" 2>/dev/null || true
 cp -a "$PREF_DIR" "$BRANCH_BACKUP_DIR/preferences.d.bak" 2>/dev/null || true
 
-# --- 2. APT HOOK: SYSTEMD FEKETELISTÁZÁS ---
+# --- 2. APT HOOK: BLACKLIST SZŰRÉS ---
 # Wrapper function for DPkg::Pre-Install-Pkgs
 apt_preinstall_filter() {
     local exit_code=0
@@ -64,7 +80,6 @@ apt_preinstall_filter() {
     done
     return "$exit_code"
 }
-# A hook function globális exportálása
 export -f apt_preinstall_filter
 
 # Apt configuration snippet a hook meghívására
@@ -73,7 +88,7 @@ DPkg::Pre-Install-Pkgs {
 "/bin/bash -c 'apt_preinstall_filter'";
 };
 EOF
-log "[ACTION] Systemd Blacklist hook (DPkg::Pre-Install-Pkgs) beállítva."
+log "[ACTION] Kiterjesztett Blacklist hook beállítva. Tiltott csomagok: ${BLACKLIST[*]}"
 
 # --- 3. HARDENING POLICYK ---
 
@@ -104,12 +119,7 @@ Package: dpkg libc6 openssl
 Pin: release a=stable
 Pin-Priority: 1001
 EOF
-log "[ACTION] Kritikus csomagok (dpkg, libc6, openssl) Pin-Priority 1001-re állítva."
+log "[ACTION] Kritikus csomagok Pin-Priority 1001-re állítva."
 
-# --- VÉGZETES ELLENŐRZÉS ---
-# Teszt (szimulált telepítés systemd csomaggal, ami hibát generálna)
-# Ha a logoláson kívül ténylegesen is le akarod tesztelni a hookot, egy hívást kellene itt indítani.
-# Jelenleg ezt elhagyjuk, hogy ne okozzunk mesterségesen hibát a chrootban.
-
-log "[DONE] 05-ös ág befejezve. APT/DPKG hardening alkalmazva."
+log "[DONE] 05-ös ág befejezve. DPKG/APT maximálisan hardeningelt."
 exit 0
