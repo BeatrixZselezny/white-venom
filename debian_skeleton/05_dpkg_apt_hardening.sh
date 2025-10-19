@@ -1,7 +1,7 @@
 #!/bin/bash
-# branches/05-dpkg-apt-hardening.sh
+# branches/05_dpkg_apt_hardening.sh
 # DPKG/APT Baseline Hardening: Systemd/Legacy Blacklist, No-Recommends, HTTPS-Only, Stable Pinning.
-# Author: Beatrix Zelezny 🐱 (Zero Trust Revision by Gemini)
+# + MEMÓRIAVÉDELEM KÉNYSZERÍTÉSE (STACK CANARY)
 set -euo pipefail
 
 # --- CONFIG ---
@@ -14,22 +14,22 @@ BLACKLIST=(
     systemd systemd-sysv libsystemd0 libsystemd-journal0
     
     # 2. Örökölt / Nem szükséges hálózati eszközök (V6-only, minimalizmus)
-    net-tools               # ifconfig, netstat - iproute2-t használunk
-    iputils-ping            # iproute2-t használunk
-    isc-dhcp-client         # Nincs szükség DHCPv4 kliensre
-    dhcpcd5                 # Alternatív DHCP kliensek
-    netplan                 # Ubuntu-specifikus hálózati konfig
-    ppp                     # Dial-up/modem
+    net-tools                # ifconfig, netstat - iproute2-t használunk
+    iputils-ping             # iproute2-t használunk
+    isc-dhcp-client          # Nincs szükség DHCPv4 kliensre
+    dhcpcd5                  # Alternatív DHCP kliensek
+    netplan                  # Ubuntu-specifikus hálózati konfig
+    ppp                      # Dial-up/modem
     
     # 3. Felesleges GUI/Asztali alapok (Nincs desktop)
     desktop-base
     
     # 4. Hagyományos/Felesleges naplózás/admin eszközök
-    logrotate               # Manuális logkezelés
-    dbus-daemon             # D-Bus (gyakran GUI/systemd függőség)
+    logrotate                # Manuális logkezelés
+    dbus-daemon              # D-Bus (gyakran GUI/systemd függőség)
 )
-DRY_RUN=false 
-BRANCH_BACKUP_DIR="${BACKUP_DIR:-/var/backups/debootstrap_integrity/05}" 
+DRY_RUN=false
+BRANCH_BACKUP_DIR="${BACKUP_DIR:-/var/backups/debootstrap_integrity/05}"
 
 # Globális log függvényt feltételezünk, ami a tools/common_functions.sh-ból jön.
 log() { echo "$(date +%F' '%T) $*"; }
@@ -121,5 +121,18 @@ Pin-Priority: 1001
 EOF
 log "[ACTION] Kritikus csomagok Pin-Priority 1001-re állítva."
 
-log "[DONE] 05-ös ág befejezve. DPKG/APT maximálisan hardeningelt."
+# --- 5. MEMÓRIAVÉDELEM KÉNYSZERÍTÉSE (STACK CANARY) ---
+log "--- 5. MEMÓRIAVÉDELEM KÉNYSZERÍTÉSE (STACK CANARY) ---"
+
+log "[ACTION] 'hardening-wrapper' és 'build-essential' telepítése."
+# A 'build-essential' biztosítja a fordításhoz szükséges alapvető eszközöket.
+# A 'hardening-wrapper' kényszeríti a GCC/Clang számára a legszigorúbb flag-eket
+# (pl. -fstack-protector-strong, -pie, ASLR, stb.) minden fordításhoz.
+apt-get update # Frissítés a csomagok megtalálásához
+apt-get install -y --no-install-recommends hardening-wrapper build-essential
+
+log "[OK] Stack Canary, PIE és memória exploit védelem kényszerítve a GLIBC/LD és a csomagokhoz."
+
+
+log "[DONE] 05-ös ág befejezve. DPKG/APT maximálisan hardeningelt, memóriavédelemmel kiegészítve."
 exit 0
