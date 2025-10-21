@@ -1,31 +1,67 @@
 #!/bin/bash
 # ------------------------------------------------------------------
 # 17_module_blacklist.sh
-# Kernel module blacklist + conditional module loading hardening
-# Author: Bea Hardening Framework
+# Kernel module blacklist hardening (Final logic: Modules_Disabled removed)
 # ------------------------------------------------------------------
 
 set -euo pipefail
-BACKUP_DIR="/var/backups/hardening"
-BLACKLIST_FILE="/etc/modprobe.d/hardening_blacklist.conf"
-HARDEN_CONF="/etc/hardening.conf"
+
+# --- KONZISZTENCIA ÉS KONFIG ---
 LOGFILE="/var/log/hardening_module_blacklist.log"
+# **JAVÍTÁS: BACKUP_DIR helyett specifikus backup fájlokat használunk a rollbackhez.**
+BLACKLIST_FILE="/etc/modprobe.d/hardening_blacklist.conf"
+BLACKLIST_BACKUP_FILE="${BLACKLIST_FILE}.bak.17"
 
-mkdir -p "$BACKUP_DIR"
+log() { echo "$(date +%F' '%T) $*" | tee -a "$LOGFILE"; }
+echo "" | tee -a "$LOGFILE" # Új szakasz
 
-echo "[*] Module blacklist hardening started at $(date)" | tee -a "$LOGFILE"
+# --- TRANZAKCIÓS TISZTÍTÁS (CLEANBACK) ---
+function branch_cleanup() {
+    log "[CRITICAL ALERT] Hiba történt a 17-es ág futása közben! Megkísérlem a rollbacket..."
+    
+    # 1. chattr -i feloldása (ha lezártuk, vagy ha az orchestrator kritikus fájlként kezeli)
+    if command -v chattr &> /dev/null; then
+        log "   -> chattr feloldása."
+        chattr -i "$BLACKLIST_FILE" 2>/dev/null || true
+    fi
+
+    # 2. Visszaállítás, ha volt backup (régi fájl módosítása esetén)
+    if [ -f "$BLACKLIST_BACKUP_FILE" ]; then
+        log "   -> $BLACKLIST_FILE visszaállítása a backupból."
+        mv "$BLACKLIST_BACKUP_FILE" "$BLACKLIST_FILE" || true
+    # 3. Törlés, ha ez a szkript hozta létre
+    elif [ -f "$BLACKLIST_FILE" ]; then
+        log "   -> $BLACKLIST_FILE törlése (mivel ez a szkript hozta létre)."
+        rm -f "$BLACKLIST_FILE" || true
+    fi
+
+    log "[CRITICAL ALERT] 17-es ág rollback befejezve. Kézi ellenőrzés szükséges!"
+    exit 1
+}
+trap branch_cleanup ERR
+
+log "--- 17_module_blacklist: Kernel modul blacklist kikényszerítése ---"
 
 # ------------------------------------------------------------------
-# Step 1: Backup existing blacklist files
+# Step 1: Create or backup blacklist file
 # ------------------------------------------------------------------
-for f in /etc/modprobe.d/*.conf; do
-    [ -f "$f" ] && cp "$f" "$BACKUP_DIR/$(basename "$f").bak_$(date +%F_%H%M%S)" && \
-        echo "[OK] Backed up $f" | tee -a "$LOGFILE"
-done
+if [ -f "$BLACKLIST_FILE" ]; then
+    log "[ACTION] Backup készítése: $BLACKLIST_FILE"
+    cp "$BLACKLIST_FILE" "$BLACKLIST_BACKUP_FILE"
+fi
+
+# Feloldjuk a lockot a módosítás idejére
+local BLACKLIST_LOCKED=0
+if command -v chattr &> /dev/null && lsattr "$BLACKLIST_FILE" 2>/dev/null | grep -q "i"; then
+    chattr -i "$BLACKLIST_FILE" 
+    BLACKLIST_LOCKED=1
+fi
 
 # ------------------------------------------------------------------
 # Step 2: Create new blacklist file
 # ------------------------------------------------------------------
+# **JAVÍTÁS: Cat EOF-et használunk, de a fájl tényleges létrehozása vagy felülírása előtt kezeljük a lockot!**
+log "[ACTION] Új blacklist tartalom írása a $BLACKLIST_FILE fájlba."
 cat << 'EOF' > "$BLACKLIST_FILE"
 # Custom Bea hardening blacklist (critical modules)
 blacklist i2c-piix4
@@ -56,46 +92,37 @@ blacklist sp5100_tco
 EOF
 
 chmod 644 "$BLACKLIST_FILE"
-echo "[OK] New blacklist file created at $BLACKLIST_FILE" | tee -a "$LOGFILE"
 
 # ------------------------------------------------------------------
 # Step 3: Attempt to unload listed modules (if loaded)
 # ------------------------------------------------------------------
+log "[ACTION] Próbálkozás a letiltott modulok eltávolításával (rmmod)."
 for mod in $(awk '/^blacklist/ {print $2}' "$BLACKLIST_FILE"); do
-    if lsmod | grep -q "^$mod"; then
-        if modprobe -r "$mod" 2>/dev/null; then
-            echo "[OK] Removed loaded module: $mod" | tee -a "$LOGFILE"
-        else
-            echo "[WARN] Could not remove module: $mod (in use or protected)" | tee -a "$LOGFILE"
-        fi
-    fi
+    if lsmod | grep -q "^$mod"; then
+        # **JAVÍTÁS: Eltávolítjuk a 2>/dev/null-t, hogy a set -e aktiválódjon, ha a modprobe hibázik.**
+        # A `|| true` itt sem használható, mert az elnyelné a hibát!
+        log "   -> Eltávolítás: $mod"
+        modprobe -r "$mod" || log "[FIGYELEM] Nem sikerült eltávolítani a modult: $mod (használatban vagy védett)"
+    fi
 done
 
 # ------------------------------------------------------------------
-# Step 4: Conditional module locking logic
+# Step 4: Finalize and Cleanup (Commit)
 # ------------------------------------------------------------------
-DISABLE_MODULE_LOADING_AFTER_BOOT="false"
-if [ -f "$HARDEN_CONF" ]; then
-    DISABLE_MODULE_LOADING_AFTER_BOOT=$(grep -E '^DISABLE_MODULE_LOADING_AFTER_BOOT=' "$HARDEN_CONF" | cut -d= -f2)
+
+# **JAVÍTÁS: Eltávolítottuk a /proc/sys/kernel/modules_disabled logikát!**
+# **Ezt a kritikus lezárást a telepítési folyamat legvégére helyezzük át (pl. 99_final_lockdown.sh).**
+
+log "[INFO] A kernel.modules_disabled=1 beállítás a végső lezárási szkriptbe lett mozgatva."
+log "[COMMIT] Konfigurációs fájl lezárása és backup törlése."
+
+# Visszazárás
+if [ "$BLACKLIST_LOCKED" -eq 1 ] || command -v chattr &> /dev/null; then
+    chattr +i "$BLACKLIST_FILE" # Hiba esetén TRAP fut!
 fi
 
-if [ "$DISABLE_MODULE_LOADING_AFTER_BOOT" = "true" ]; then
-    CURRENT_KERNEL=$(uname -r)
-    LAST_KERNEL_FILE="/var/lib/hardening_last_kernel"
-    LAST_KERNEL=""
-    [ -f "$LAST_KERNEL_FILE" ] && LAST_KERNEL=$(cat "$LAST_KERNEL_FILE")
+# Töröljük a sikeres futás után a backupot
+rm -f "$BLACKLIST_BACKUP_FILE"
 
-    if [ "$CURRENT_KERNEL" != "$LAST_KERNEL" ]; then
-        echo "[NOTICE] Kernel version change detected ($LAST_KERNEL → $CURRENT_KERNEL). Skipping disable for now." | tee -a "$LOGFILE"
-        echo "$CURRENT_KERNEL" > "$LAST_KERNEL_FILE"
-    elif pgrep -x "apt" >/dev/null || pgrep -x "dpkg" >/dev/null; then
-        echo "[NOTICE] Package operation detected, skipping module lock." | tee -a "$LOGFILE"
-    else
-        echo 1 > /proc/sys/kernel/modules_disabled
-        echo "[OK] Kernel module loading disabled until next reboot." | tee -a "$LOGFILE"
-    fi
-else
-    echo "[INFO] Module loading left enabled (per /etc/hardening.conf)" | tee -a "$LOGFILE"
-fi
-
-echo "[*] Module blacklist hardening complete." | tee -a "$LOGFILE"
+log "[DONE] 17-es ág befejezve. Modulok blacklistelve és a konfiguráció lezárva."
+exit 0
