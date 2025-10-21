@@ -1,86 +1,174 @@
 #!/bin/bash
 # 19_stack_canary_enforce.sh - Stack Canary (-fstack-protector-strong) kikényszerítése globálisan
 
-echo "--- 19_stack_canary_enforce: Stack Canary beállítások kikényszerítése ---"
-
-# 1. Globális build opciók beállítása (pl. Gentoo / általános Linux build)
-# Cél: Biztosítani, hogy a build rendszerek használják a -fstack-protector-strong opciót.
-# Ha nem létezik /etc/make.conf (pl. Debian-alapú rendszer), akkor kihagyjuk, de érdemes lehet hozzáadni.
-MAKE_CONF="/etc/make.conf"
+# Zero-Trust/Tranzakcionális beállítások:
+set -euo pipefail
+LOGFILE="/var/log/stack_canary_enforce.log"
 STACK_CANARY_FLAG="-fstack-protector-strong"
 
-echo "1. CFLAGS/CXXFLAGS beállítása globális build környezethez ($MAKE_CONF)..."
+MAKE_CONF="/etc/make.conf"
+ENV_CONF="/etc/environment"
+
+# Globális log függvényt feltételezünk
+log() { echo "$(date +%F' '%T) $*" | tee -a "$LOGFILE"; }
+
+# --- TRANZAKCIÓS TISZTÍTÁS (CLEANBACK) ---
+# Rollback: Visszaállítja az eredeti fájlokat hiba esetén, és feloldja a lockot.
+function branch_cleanup() {
+    log "[CRITICAL ALERT] Hiba történt a 19-es ág futása közben! Megkísérlem a rollbacket..."
+    
+    # 1. /etc/make.conf visszaállítása
+    if [ -f "${MAKE_CONF}.bak.19" ]; then
+        log "   -> $MAKE_CONF visszaállítása a backupból."
+        mv "${MAKE_CONF}.bak.19" "$MAKE_CONF"
+        # Mivel a hiba előtt lezárhattuk, feloldjuk
+        if command -v chattr &> /dev/null; then chattr -i "$MAKE_CONF" || true; fi
+    fi
+    
+    # 2. /etc/environment visszaállítása
+    if [ -f "${ENV_CONF}.bak.19" ]; then
+        log "   -> $ENV_CONF visszaállítása a backupból."
+        mv "${ENV_CONF}.bak.19" "$ENV_CONF"
+        if command -v chattr &> /dev/null; then chattr -i "$ENV_CONF" || true; fi
+    fi
+    
+    log "[CRITICAL ALERT] 19-es ág rollback befejezve. Kézi ellenőrzés szükséges!"
+    exit 1
+}
+trap branch_cleanup ERR
+
+log "--- 19_stack_canary_enforce: Stack Canary beállítások kikényszerítése ---"
+
+# --- HELPER FUNKCIÓ A FLAG-EK TISZTÍTÁSÁRA ---
+# Eltávolítja a régi/gyengébb canary flag-eket és a duplikációkat.
+clean_flags() {
+    local FLAGS="$1"
+    # Eltávolítja a gyengébb opciókat és a -fstack-protector-strong duplikációkat
+    echo "$FLAGS" | sed 's/-fstack-protector-all//g' \
+                  | sed 's/-fstack-protector[^s][^t]//g' \
+                  | tr ' ' '\n' \
+                  | grep -vE '^\s*$' \
+                  | sort -u \
+                  | tr '\n' ' ' \
+                  | xargs \
+                  | sed "s/$/ $STACK_CANARY_FLAG/" \
+                  | xargs | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs
+}
+
+# --- 1. CFLAGS/CXXFLAGS beállítása globális build környezethez (/etc/make.conf) ---
+log "1. CFLAGS/CXXFLAGS beállítása globális build környezethez ($MAKE_CONF)..."
 
 if [ -f "$MAKE_CONF" ]; then
+    log "[ACTION] Backup készítése: $MAKE_CONF"
     cp "$MAKE_CONF" "${MAKE_CONF}.bak.19"
     
-    # Függvény a beállítás beszúrására/frissítésére
-    update_flags() {
+    # Feloldjuk a lockot a módosítás idejére
+    local MAKE_CONF_LOCKED=0
+    if command -v chattr &> /dev/null && lsattr "$MAKE_CONF" 2>/dev/null | grep -q "i"; then
+        chattr -i "$MAKE_CONF" # Hiba esetén TRAP fut
+        MAKE_CONF_LOCKED=1
+    fi
+
+    update_make_conf_flags() {
         local VAR_NAME=$1
-        # Ellenőrizzük, hogy a változó már tartalmazza-e az opciót. Ha nem, hozzáadjuk, és eltávolítjuk az esetleges -fstack-protector-all vagy sima -fstack-protector-t.
         
+        # 1. Kinyerjük a régi flag-eket, vagy üres stringet használunk
         if grep -q "^${VAR_NAME}=" "$MAKE_CONF"; then
-            # 1a. Eltávolítjuk a gyengébb, vagy meglévő canary opciót, ha van.
-            sed -i "s/\(^${VAR_NAME}=.*-fstack-protector-all.*\)/\1/g" "$MAKE_CONF"
-            sed -i "s/\(^${VAR_NAME}=.*-fstack-protector[^s][^t].*\)/\1/g" "$MAKE_CONF"
-            
-            # 1b. Hozzáadjuk a -fstack-protector-strong opciót, ha még nem szerepel.
-            if ! grep -q "^${VAR_NAME}=.*${STACK_CANARY_FLAG}" "$MAKE_CONF"; then
-                sed -i "/^${VAR_NAME}=/ s/\"$/ ${STACK_CANARY_FLAG}\"/" "$MAKE_CONF"
-                echo "    -> Frissítve: ${VAR_NAME} beállítva $STACK_CANARY_FLAG-ra."
-            else
-                echo "    -> Ellenőrizve: ${VAR_NAME} már tartalmazza a $STACK_CANARY_FLAG opciót."
-            fi
+            OLD_FLAGS=$(grep "^${VAR_NAME}=" "$MAKE_CONF" | cut -d\" -f2)
         else
-            # Ha a változó nem létezik, hozzáadjuk a fájl végéhez.
-            echo "${VAR_NAME}=\"${STACK_CANARY_FLAG}\"" >> "$MAKE_CONF"
-            echo "    -> Hozzáadva: ${VAR_NAME} új sorral: $STACK_CANARY_FLAG."
+            OLD_FLAGS=""
+        fi
+        
+        NEW_FLAGS=$(clean_flags "$OLD_FLAGS")
+        
+        # 2. Beszúrás/Felülírás
+        if grep -q "^${VAR_NAME}=" "$MAKE_CONF"; then
+            # Lecseréli a meglévő sort
+            sed -i "/^${VAR_NAME}=/c\\${VAR_NAME}=\"${NEW_FLAGS}\"" "$MAKE_CONF"
+            log "   -> Frissítve: ${VAR_NAME} beállítva \"${NEW_FLAGS}\"."
+        else
+            # Hozzáadja a fájl végéhez
+            echo "${VAR_NAME}=\"${NEW_FLAGS}\"" >> "$MAKE_CONF"
+            log "   -> Hozzáadva: ${VAR_NAME} új sorral: \"${NEW_FLAGS}\"."
         fi
     }
     
-    update_flags "CFLAGS"
-    update_flags "CXXFLAGS"
+    update_make_conf_flags "CFLAGS"
+    update_make_conf_flags "CXXFLAGS"
     
+    # Visszazárás (COMMIT)
+    if [ "$MAKE_CONF_LOCKED" -eq 1 ] || command -v chattr &> /dev/null; then
+        log "[COMMIT] $MAKE_CONF lezárása (chattr +i)."
+        chattr +i "$MAKE_CONF" # Hiba esetén TRAP fut
+    fi
+    
+    # Sikeres COMMIT után töröljük a backupot
+    rm -f "${MAKE_CONF}.bak.19"
+
 else
-    echo "Figyelem: A(z) $MAKE_CONF fájl nem található. Manuális build folyamatok nem biztos, hogy öröklik a beállításokat."
+    log "[FIGYELEM] A $MAKE_CONF fájl nem található. Kihagyás."
 fi
 
-# 2. Globális környezeti változók beállítása (/etc/environment)
-# Bár a /etc/make.conf a legjobb, /etc/environment biztosítja, hogy a legtöbb interaktív és nem interaktív shell ezt lássa.
-ENV_CONF="/etc/environment"
-echo "2. Globális környezeti változók ($ENV_CONF) beállítása..."
+# --- 2. Globális környezeti változók beállítása (/etc/environment) ---
+log "2. Globális környezeti változók ($ENV_CONF) beállítása..."
 
-# Készítünk egy ideiglenes fájlt a CFLAGS/CXXFLAGS frissített értékének tárolására.
+# Backup a rollbackhez
+log "[ACTION] Backup készítése: $ENV_CONF"
+cp "$ENV_CONF" "${ENV_CONF}.bak.19"
+
+# Feloldjuk a lockot a módosítás idejére
+local ENV_CONF_LOCKED=0
+if command -v chattr &> /dev/null && lsattr "$ENV_CONF" 2>/dev/null | grep -q "i"; then
+    chattr -i "$ENV_CONF"
+    ENV_CONF_LOCKED=1
+fi
+
+# Készítünk egy ideiglenes fájlt a frissített tartalom tárolására.
 TEMP_ENV=$(mktemp)
 
-# CFLAGS frissítése
-# Eltávolítjuk a régi CFLAGS sort.
-grep -v "^CFLAGS=" "$ENV_CONF" > "$TEMP_ENV"
+update_env_conf_flags() {
+    local VAR_NAME=$1
+    local INPUT_FILE=$2
+    
+    # 1. Kinyerjük a régi flag-eket
+    if grep -q "^${VAR_NAME}=" "$ENV_CONF"; then
+        OLD_FLAGS=$(grep "^${VAR_NAME}=" "$ENV_CONF" | cut -d\" -f2)
+    else
+        OLD_FLAGS=""
+    fi
+    
+    NEW_FLAGS=$(clean_flags "$OLD_FLAGS")
+    
+    # 2. Eltávolítjuk a régi sort, ha létezett
+    grep -v "^${VAR_NAME}=" "$INPUT_FILE" > "$TEMP_ENV.tmp"
+    
+    # 3. Hozzáadjuk az új, tiszta sort
+    echo "${VAR_NAME}=\"${NEW_FLAGS}\"" >> "$TEMP_ENV.tmp"
+    
+    mv "$TEMP_ENV.tmp" "$INPUT_FILE"
+    log "   -> Beállítva: ${VAR_NAME} a(z) $ENV_CONF fájlban: \"${NEW_FLAGS}\"."
+}
 
-# Hozzáadjuk az új sort (ha a CFLAGS már létezik, akkor kibővítjük, ha nem, akkor csak az új flag-et adjuk hozzá)
-if grep -q "^CFLAGS=" "$ENV_CONF"; then
-    OLD_CFLAGS=$(grep "^CFLAGS=" "$ENV_CONF" | cut -d\" -f2)
-    NEW_CFLAGS="$OLD_CFLAGS $STACK_CANARY_FLAG"
-    # Eltávolítjuk a duplikációt / gyengébb opciót
-    NEW_CFLAGS=$(echo "$NEW_CFLAGS" | sed 's/-fstack-protector-all//g' | sed 's/-fstack-protector//g' | sed 's/  */ /g' | xargs | sed 's/ / /g')
-    echo "CFLAGS=\"$NEW_CFLAGS\"" >> "$TEMP_ENV"
-else
-    echo "CFLAGS=\"$STACK_CANARY_FLAG\"" >> "$TEMP_ENV"
+# Inicializáljuk a TEMP_ENV-t a meglévő /etc/environment tartalmával
+cp "$ENV_CONF" "$TEMP_ENV"
+
+# Frissítjük a CFLAGS és CXXFLAGS változókat a TEMP_ENV fájlban
+update_env_conf_flags "CFLAGS" "$TEMP_ENV"
+update_env_conf_flags "CXXFLAGS" "$TEMP_ENV"
+
+# Felülírjuk az /etc/environment fájlt a frissített tartalommal
+mv "$TEMP_ENV" "$ENV_CONF"
+rm -f "$TEMP_ENV" 2> /dev/null
+
+# Visszazárás (COMMIT)
+if [ "$ENV_CONF_LOCKED" -eq 1 ] || command -v chattr &> /dev/null; then
+    log "[COMMIT] $ENV_CONF lezárása (chattr +i)."
+    chattr +i "$ENV_CONF"
 fi
 
-# CXXFLAGS frissítése (ugyanaz a logika)
-grep -v "^CXXFLAGS=" "$TEMP_ENV" > "$ENV_CONF.tmp2"
-if grep -q "^CXXFLAGS=" "$ENV_CONF"; then
-    OLD_CXXFLAGS=$(grep "^CXXFLAGS=" "$ENV_CONF" | cut -d\" -f2)
-    NEW_CXXFLAGS="$OLD_CXXFLAGS $STACK_CANARY_FLAG"
-    NEW_CXXFLAGS=$(echo "$NEW_CXXFLAGS" | sed 's/-fstack-protector-all//g' | sed 's/-fstack-protector//g' | sed 's/  */ /g' | xargs | sed 's/ / /g')
-    echo "CXXFLAGS=\"$NEW_CXXFLAGS\"" >> "$ENV_CONF.tmp2"
-else
-    echo "CXXFLAGS=\"$STACK_CANARY_FLAG\"" >> "$ENV_CONF.tmp2"
-fi
+# Sikeres COMMIT után töröljük a backupot
+rm -f "${ENV_CONF}.bak.19"
 
-mv "$ENV_CONF.tmp2" "$ENV_CONF"
-rm "$TEMP_ENV" 2> /dev/null
-
-echo "Stack Canary opciók hozzáadva a(z) $ENV_CONF és $MAKE_CONF fájlokhoz."
-echo "--- 19_stack_canary_enforce Befejezve ---"
+log "[DONE] Stack Canary opciók kikényszerítve az összes globális build konfigurációban."
+log "--- 19_stack_canary_enforce Befejezve ---"
+exit 0
