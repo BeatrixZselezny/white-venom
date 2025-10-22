@@ -2,7 +2,7 @@
 # branches/00_install.sh
 # SKELL bootstrap: teljes memória-hardening + memguard runtime + debootstrap integrity + .so integritás + ld.so.conf.d locking
 # Author: Beatrix Zelezny 🐱 + assistant merge
-# Revision: 2025-10-20 (merged full with --dry-run support)
+# Revision: 2025-10-22 (Fix: Hardening-wrapper removed, Systemd mounts removed, ESSENTIAL_PKGS defined)
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -11,7 +11,7 @@ IFS=$'\n\t'
 MODE=${1:-"--apply"}
 IS_DRY_RUN=false
 if [ "$MODE" == "--dry-run" ]; then
-    IS_DRY_RUN=true
+    IS_DRY_RUN=true
 fi
 # -----------------------------
 
@@ -46,8 +46,19 @@ PUBLIC_KEY="$KEY_DIR/skell_integrity.pub.pem"
 SKELL_LDCONF="/etc/ld.so.conf.d/skell.conf"
 SKELL_LIBDIR="/usr/local/lib"
 
-# csomaglista, kímélve (opcionálisak)
-PKGS=(hardening-wrapper build-essential dpkg-dev auditd apparmor debootstrap)
+# JAVÍTVA: ESSZENCIÁLIS CSOMAGOK ALLOW-LISTJE (Zero-Trust alap)
+# Tartalmazza a memguard fordításához, a debootstrap futtatásához és az integritás ellenőrzéshez szükséges csomagokat,
+# beleértve a 'util-linux'-ot is a hardveróra és az 'chattr' parancsért.
+readonly ESSENTIAL_PKGS=(
+    debootstrap
+    gcc
+    make
+    dpkg-dev
+    auditd
+    apparmor
+    coreutils
+    util-linux
+)
 
 # memguard source (embedded to keep the flow closed)
 MEMGUARD_SRC="/tmp/memguard_$$.c"
@@ -171,9 +182,9 @@ log() { echo "$(date +%F' '%T) [00_install] $*" | tee -a "$LOG_FILE"; }
 
 # ÚJ: Ez a funkció csak dry-run módban logolja, hogy mi történne.
 dry_run_log() {
-    if $IS_DRY_RUN; then
-        log "[DRY-RUN] TENNÉ: $*"
-    fi
+    if $IS_DRY_RUN; then
+        log "[DRY-RUN] TENNÉ: $*"
+    fi
 }
 
 on_err() {
@@ -194,57 +205,55 @@ fi
 # DRY-RUN FÁZIS
 # ---------------------------
 if $IS_DRY_RUN; then
-    log "START: SKELL 00_install bootstrap flow (DRY-RUN MODE)"
-    
-    # 1) ASLR + sysctl persist
-    log "1) ASLR bekapcsolása (kernel.randomize_va_space=2)"
-    dry_run_log "sysctl -w kernel.randomize_va_space=2"
-    dry_run_log "echo want_sysctl > /etc/sysctl.d/99-skell-memory-hardening.conf"
-    dry_run_log "sysctl --system"
-    
-    # 2) NX check (log only) - log only, így futhat dry-runban is.
-    log "2) NX (Execute Disable) ellenőrzés (CSAK LOG)"
-    # ... (eredeti NX logika a fájl végén található APPLY szakaszban)
+    log "START: SKELL 00_install bootstrap flow (DRY-RUN MODE)"
+    
+    # 1) ASLR + sysctl persist
+    log "1) ASLR bekapcsolása (kernel.randomize_va_space=2)"
+    dry_run_log "sysctl -w kernel.randomize_va_space=2"
+    dry_run_log "echo want_sysctl > /etc/sysctl.d/99-skell-memory-hardening.conf"
+    dry_run_log "sysctl --system"
+    
+    # 2) NX check (log only) - log only, így futhat dry-runban is.
+    log "2) NX (Execute Disable) ellenőrzés (CSAK LOG)"
+    # ... (eredeti NX logika a fájl végén található APPLY szakaszban)
 
-    # 3) Optional package install
-    log "3) apt-get update és opcionális csomagok telepítése"
-    for p in "${PKGS[@]}"; do
-        dry_run_log "apt-get install -y --no-install-recommends $p"
-    done
+    # 3) Essential package install
+    log "3) apt-get update és esszenciális csomagok telepítése"
+    for p in "${ESSENTIAL_PKGS[@]}"; do
+        dry_run_log "apt-get install -y --no-install-recommends $p"
+    done
 
-    # 4) dpkg buildflags
-    log "4) dpkg buildflags beállítása"
-    dry_run_log "echo want_flags > /etc/dpkg/buildflags.conf"
+    # 4) dpkg buildflags
+    log "4) dpkg buildflags beállítása"
+    dry_run_log "echo want_flags > /etc/dpkg/buildflags.conf"
 
-    # 5) hardening-wrapper alternatives (if present)
-    log "5) hardening-wrapper alternatives beállítási kísérlet"
-    dry_run_log "update-alternatives --set cc /usr/bin/hardening-wrapper"
-    dry_run_log "update-alternatives --set c++ /usr/bin/hardening-wrapper"
+    # 5) hardening-wrapper alternatives (ELTÁVOLÍTVA)
+    log "5) hardening-wrapper alternatives ELHAGYVA (Hiányzik a Trixie repóból)"
 
-    # 6) Memguard build + install
-    log "6) Memguard build & install (embedded source -> build -> install)"
-    dry_run_log "Compiling memguard from embedded source (gcc) to $MG_SO"
-    dry_run_log "Létrehozza a preload profile-t: /etc/profile.d/skell_memguard.sh"
+    # 6) Memguard build + install
+    log "6) Memguard build & install (embedded source -> build -> install)"
+    dry_run_log "Compiling memguard from embedded source (gcc) to $MG_SO"
+    dry_run_log "Létrehozza a preload profile-t: /etc/profile.d/skell_memguard.sh"
 
-    # 7) debootstrap + offline integritás
-    log "7) debootstrap + offline integritásellenőrzés"
-    dry_run_log "debootstrap futtatása $RELEASE -> $TARGET"
-    log "INFO: Integritás ellenőrzés fut (CSAK LOG)"
+    # 7) debootstrap + offline integritás
+    log "7) debootstrap + offline integritásellenőrzés"
+    dry_run_log "debootstrap futtatása $RELEASE -> $TARGET"
+    log "INFO: Integritás ellenőrzés fut (CSAK LOG)"
 
-    # 8) Shared object protection
-    log "8) Shared object protection: integritás DB, aláírás, chattr +i"
-    dry_run_log "Lib hash-ek gyűjtése: $INTEGRITY_DB"
-    dry_run_log "Kulcspár generálása: $PRIVATE_KEY / $PUBLIC_KEY"
-    dry_run_log "Integritás adatbázis aláírása: $SIGNED_DB"
-    dry_run_log "chattr +i beállítása a .so fájlokra"
-    dry_run_log "ld.so.conf.d frissítése és $SKELL_LDCONF chattr +i lezárása"
+    # 8) Shared object protection
+    log "8) Shared object protection: integritás DB, aláírás, chattr +i"
+    dry_run_log "Lib hash-ek gyűjtése: $INTEGRITY_DB"
+    dry_run_log "Kulcspár generálása: $PRIVATE_KEY / $PUBLIC_KEY"
+    dry_run_log "Integritás adatbázis aláírása: $SIGNED_DB"
+    dry_run_log "chattr +i beállítása a .so fájlokra"
+    dry_run_log "ld.so.conf.d frissítése és $SKELL_LDCONF chattr +i lezárása"
 
-    # 9) Quick sanity & write CANARY
-    log "9) CANARY OK/FAIL írása"
-    dry_run_log "echo OK: system_memory_hardening active > $CANARY_FILE"
-    
-    log "00_install completed. (DRY-RUN) RC=0"
-    exit 0
+    # 9) Quick sanity & write CANARY
+    log "9) CANARY OK/FAIL írása"
+    dry_run_log "echo OK: system_memory_hardening active > $CANARY_FILE"
+    
+    log "00_install completed. (DRY-RUN) RC=0"
+    exit 0
 fi
 
 # ---------------------------
@@ -278,18 +287,21 @@ if grep -qi -E '\bnx\b' /proc/cpuinfo 2>/dev/null; then NX_OK=1; log "NX bit SUP
 fi
 
 # ---------------------------
-# 3) Optional package install
+# 3) Essential package install (MÓDOSÍTVA)
 # ---------------------------
 if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
-  log "3) apt-get update és opcionális csomagok telepítése"
-  apt-get update -y >>"$LOG_FILE" 2>&1 || log "apt-get update hiba (folytatom)"
-  for p in "${PKGS[@]}"; do
+  log "3) apt-get update és esszenciális csomagok telepítése"
+  # JAVÍTVA: Explicit hibaellenőrzés az apt-get update után.
+  apt-get update -y >>"$LOG_FILE" 2>&1 || { log "[FATAL ERROR] apt-get update sikertelen!"; exit 1; }
+  
+  for p in "${ESSENTIAL_PKGS[@]}"; do # <--- MÓDOSÍTOTT VÁLTOZÓ
     if apt-cache show "$p" >/dev/null 2>&1; then
       log "Telepítem: $p"
+      # Csak a telepítés sikertelensége esetén ad WARN-t, de folytatja (minél több essential csomag települjön)
       apt-get install -y --no-install-recommends "$p" >>"$LOG_FILE" 2>&1 || log "WARN: $p telepítése sikertelen"
     else
-      log "INFO: $p nem elérhető, kihagyom"
+      log "INFO: $p nem elérhető a repóban, kihagyom (Hardening-wrapper eset)."
     fi
   done
 else
@@ -310,27 +322,10 @@ else
 fi
 
 # ---------------------------
-# 5) hardening-wrapper alternatives (if present)
+# 5) hardening-wrapper alternatives (ELTÁVOLÍTVA)
 # ---------------------------
-if command -v hardening-wrapper >/dev/null 2>&1; then
-  log "5) hardening-wrapper alternatives beállítási kísérlet"
-  if update-alternatives --query cc >/dev/null 2>&1; then
-    if update-alternatives --list cc | grep -q 'hardening-wrapper' >/dev/null 2>&1; then
-      update-alternatives --set cc /usr/bin/hardening-wrapper || true
-    else
-      update-alternatives --install /usr/bin/cc cc /usr/bin/hardening-wrapper 50 || true
-      update-alternatives --set cc /usr/bin/hardening-wrapper || true
-    fi
-  fi
-  if update-alternatives --query c++ >/dev/null 2>&1; then
-    if update-alternatives --list c++ | grep -q 'hardening-wrapper' >/dev/null 2>&1; then
-      update-alternatives --set c++ /usr/bin/hardening-wrapper || true
-    else
-      update-alternatives --install /usr/bin/c++ c++ /usr/bin/hardening-wrapper 50 || true
-      update-alternatives --set c++ /usr/bin/hardening-wrapper || true
-    fi
-  fi
-fi
+# ELTÁVOLÍTVA: A csomag hiánya és a zero-trust minimalizmus miatt.
+log "5) hardening-wrapper alternatives ELHAGYVA. A DPKG buildflags biztosítja a hardeninget."
 
 # ---------------------------
 # 6) Memguard build + install (self-contained, LD_PRELOAD via /etc/profile.d)
@@ -383,10 +378,8 @@ else
   log "WARN: debootstrap nem elérhető, telepítés kihagyva."
 fi
 
-# chroot mounts (if any)
-mount -t proc none "$TARGET/proc" 2>/dev/null || true
-mount --rbind /sys "$TARGET/sys" 2>/dev/null || true
-mount --rbind /dev "$TARGET/dev" 2>/dev/null || true
+# JAVÍTVA: Eltávolítva a Systemd-re utaló chroot mountok.
+log "INFO: /proc /sys /dev mount pontok eltávolítva a Host rendszerről (Systemd-mentes). A chroot setup-nak kell ezeket később kezelnie."
 
 # offline libc/ld integrity check inside TARGET
 LOGFILE_INT="$LOGDIR/00_integrity_$TIMESTAMP.log"
@@ -488,4 +481,71 @@ if $HARD_FAIL || $ELF_ALERT || $BPF_ALERT; then
   log "Integrity checks failed. See: $LOGFILE_INT"
   exit 11
 else
-  echo "$(date +%F' '%T) [00_install] PASS: Integri
+  echo "$(date +%F' '%T) [00_install] PASS: Integritás ellenőrzés befejezve." >&3
+fi
+exec 1>&3 3>&- # Integritás log lezárása
+
+# ---------------------------
+# 8) Shared object protection
+# ---------------------------
+log "8) Shared object protection: integritás DB, aláírás, chattr +i"
+# Ezen a ponton feltételezzük, hogy a memguard már lefordult, és a libc/ld elérhető.
+
+# 8.1 SHA256 Lib hash-ek gyűjtése és aláírása
+log "Lib hash-ek gyűjtése: $INTEGRITY_DB"
+: > "$INTEGRITY_DB"
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  sha256sum "$f" >>"$INTEGRITY_DB"
+done <<<"$(printf "%s\n" "$LIB_FILES")$(find "$MG_DIR" -name "*.so" -type f 2>/dev/null || true)"
+
+# Kulcspár generálás (ha még nem létezik)
+if [ ! -f "$PRIVATE_KEY" ]; then
+  log "Kulcspár generálása: $PRIVATE_KEY / $PUBLIC_KEY"
+  openssl genpkey -algorithm RSA -out "$PRIVATE_KEY" -pkeyopt rsa_keysize:4096 -aes256 -pass pass:skell_zero_trust
+  openssl rsa -pubout -in "$PRIVATE_KEY" -out "$PUBLIC_KEY" -passin pass:skell_zero_trust
+  chmod 0400 "$PRIVATE_KEY"
+  chmod 0444 "$PUBLIC_KEY"
+fi
+
+# Integritás adatbázis aláírása
+if [ -f "$PRIVATE_KEY" ]; then
+  log "Integritás adatbázis aláírása: $SIGNED_DB"
+  openssl dgst -sha256 -sign "$PRIVATE_KEY" -passin pass:skell_zero_trust -out "$SIGNED_DB" "$INTEGRITY_DB"
+else
+  log "WARN: Privát kulcs hiányzik, integritás adatbázis nem aláírva."
+fi
+
+# 8.2 ld.so.conf.d frissítése és lezárása
+log "ld.so.conf.d frissítése és $SKELL_LDCONF chattr +i lezárása"
+echo "$SKELL_LIBDIR" > "$SKELL_LDCONF"
+/sbin/ldconfig >/dev/null 2>&1 || log "ldconfig hiba (folytatom)"
+if command -v chattr &> /dev/null; then
+  chattr +i "$SKELL_LDCONF"
+else
+  log "[CRITICAL ERROR] chattr parancs nem található! A loader konfiguráció nem védhető."
+  exit 1
+fi
+
+# 8.3 Chattr +i beállítása a kritikus .so fájlokra
+log "chattr +i beállítása a kritikus .so fájlokra (libc, ld, memguard)"
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  if command -v chattr &> /dev/null; then
+    chattr +i "$f" || log "WARN: chattr +i sikertelen $f-en"
+  else
+    log "[CRITICAL ERROR] chattr hiánya: lib lockolás sikertelen."
+    exit 1
+  fi
+done <<<"$(printf "%s\n" "$LIB_FILES")$(find "$MG_DIR" -name "*.so" -type f 2>/dev/null || true)"
+
+
+# ---------------------------
+# 9) Quick sanity & write CANARY
+# ---------------------------
+log "9) CANARY OK/FAIL írása"
+echo "$(date +%F_%T) OK: system_memory_hardening active" > "$CANARY_FILE"
+chmod 0444 "$CANARY_FILE"
+
+log "[DONE] 00_install bootstrap befejezve."
+exit 0
