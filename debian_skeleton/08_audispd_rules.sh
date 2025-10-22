@@ -10,50 +10,61 @@ AUDITD_RULES_DIR="/etc/audit/rules.d"
 RULES_FILE="$AUDITD_RULES_DIR/99-hardening.rules"
 SECURETTY_FILE="/etc/securetty"
 # Központosított backup hely használata
-BRANCH_BACKUP_DIR="${BACKUP_DIR:-/var/backups/debootstrap_integrity/08}"
+RULES_FILE_BACKUP="$RULES_FILE.bak.08"
 # Globális log függvényt feltételezünk
-log() { echo "$(date +%F' '%T) $*"; }
+log() { echo "$(date +%F' '%T) $*" | tee -a "$LOGFILE"; }
+log "" # Új szakasz
 
 # Ellenőrzés: root user
 if [ "$(id -u)" -ne 0 ]; then
-    log "[ERROR] Run as root!" >&2
-    exit 1
+    log "[ERROR] Run as root!" >&2
+    exit 1
 fi
 
 # --- TRANZAKCIÓS TISZTÍTÁS (CLEANUP/ROLLBACK) ---
-branch_cleanup() {
-    log "[ALERT] Hiba történt a 08-as ág futása közben! Rollback a szabályokra..."
-    
-    # 1. Auditd szabályok visszaállítása (ha van backup)
-    if [ -f "$RULES_FILE.bak" ]; then
-        log "[ACTION] Auditd szabályok visszaállítása a backupból."
-        mv "$RULES_FILE.bak" "$RULES_FILE"
-        /sbin/augenrules --load || true # Szabályok újratöltése a visszaállított fájlból
-    else
-        log "[WARNING] Nincs backup a $RULES_FILE-ról, a szabályt törlöm."
-        rm -f "$RULES_FILE"
-    fi
-    # A securetty fájlt nem állítjuk vissza, mivel a cél az eltávolítása volt.
-    log "[ALERT] 08-as ág rollback befejezve."
+function branch_cleanup() {
+    log "[CRITICAL ALERT] Hiba történt a 08-as ág futása közben! Rollback a szabályokra..."
+    
+    # **JAVÍTÁS: A szabályfájl zárolásának feloldása**
+    if command -v chattr &> /dev/null; then chattr -i "$RULES_FILE" 2>/dev/null || true; fi
+
+    # 1. Auditd szabályok visszaállítása (ha van backup)
+    if [ -f "$RULES_FILE_BACKUP" ]; then
+        log "[ACTION] Auditd szabályok visszaállítása a backupból."
+        mv "$RULES_FILE_BACKUP" "$RULES_FILE" || true
+        /sbin/augenrules --load || true # Szabályok újratöltése
+    else
+        log "[WARNING] Nincs backup a $RULES_FILE-ról, a szabályt törlöm."
+        rm -f "$RULES_FILE" || true
+    fi
+    
+    log "[CRITICAL ALERT] 08-as ág rollback befejezve. Kézi ellenőrzés szükséges!"
+    exit 1
 }
 
 # Hiba esetén a rollback funkció meghívása
 trap branch_cleanup ERR
 
 # --- 1. BACKUP (Tranzakció indul) ---
-log "[PRECHECK] Készítek backupot a meglévő $RULES_FILE-ról."
-mkdir -p "$BRANCH_BACKUP_DIR"
-cp -a "$RULES_FILE" "$RULES_FILE.bak" 2>/dev/null || true
+log "1. Készítek backupot a meglévő $RULES_FILE-ról."
+# **JAVÍTÁS: Csak akkor készítünk backupot, ha a fájl létezik, és a fájlnév pontos.**
+if [ -f "$RULES_FILE" ]; then
+    cp "$RULES_FILE" "$RULES_FILE_BACKUP"
+    # Fájl feloldása a módosításhoz, ha le volt zárva
+    if command -v chattr &> /dev/null && lsattr "$RULES_FILE" 2>/dev/null | grep -q "i"; then
+        chattr -i "$RULES_FILE" 
+    fi
+fi
 
 # --- 2. SECURETTY ELTÁVOLÍTÁSA ÉS AUDITD SZABÁLYOK GENERÁLÁSA ---
 
 # Hardening: /etc/securetty eltávolítása, hogy megelőzze a tty alapú root logint
 if [ -f "$SECURETTY_FILE" ]; then
-    log "[HARDENING] $SECURETTY_FILE eltávolítása (Explicit Zero Trust Minimalizálás)."
-    rm -f "$SECURETTY_FILE"
+    log "[HARDENING] $SECURETTY_FILE eltávolítása (Explicit Zero Trust Minimalizálás)."
+    rm -f "$SECURETTY_FILE"
 fi
 
-log "[ACTION] $RULES_FILE létrehozása a Zero Trust szabályokkal."
+log "2. $RULES_FILE létrehozása a Zero Trust szabályokkal."
 
 cat > "$RULES_FILE" <<'EOF'
 # --- 99-hardening.rules (Zero Trust Audit) ---
@@ -67,8 +78,6 @@ cat > "$RULES_FILE" <<'EOF'
 -w /etc/gshadow -p wa -k identity
 -w /etc/sudoers -p wa -k scope
 -w /etc/sudoers.d/ -p wa -k scope
-
-# /etc/securetty figyelése (még ha töröltük is, a létrehozást naplózza!)
 -w /etc/securetty -p wa -k secure-ttys
 
 # Rendszerindítási és Init.d változások figyelése (SysV Init environment)
@@ -76,53 +85,66 @@ cat > "$RULES_FILE" <<'EOF'
 -w /etc/init.d/ -p wa -k init
 -w /etc/default/ -p wa -k init
 
-# Kernel modulok figyelése (Rootkit prevenció)
--w /sbin/insmod -p x -k modules
--w /sbin/rmmod -p x -k modules
--w /sbin/modprobe -p x -k modules
+# 2. Kernel modulok figyelése (Rendszerhívás alapú Rootkit prevenció)
+# **JAVÍTÁS: Csak a rendszerhívásokat figyeljük (pontosabb és minimalista).**
+-a always,exit -F arch=b32 -S init_module -S delete_module -k modules
 -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
 
-# 2. Hálózati és Biztonsági Konfiguráció figyelése (Hardening)
-# Tűzfal beállítások figyelése (ip6tables a mi Zero Trust alapunk)
+
+# 3. Hálózati és Biztonsági Konfiguráció figyelése (Hardening)
 -w /sbin/ip6tables -p x -k firewall
 -w /etc/ip6tables/ -p wa -k firewall
-
-# DNS konfiguráció figyelése (resolv.conf a Zero Trust DNS-ünk!)
 -w /etc/resolv.conf -p wa -k dns-conf
-
-# Auditd saját konfigurációjának figyelése (detektor elleni védelem)
 -w /etc/audit/ -p wa -k audit-conf
 
-# 3. Privilégium Eszkaláció Figyelése (User Integrity)
+# 4. Privilégium Eszkaláció Figyelése (User Integrity)
 
 # Sikertelen SU kísérletek rögzítése
+-a always,exit -F arch=b32 -S execve -F path=/bin/su -F exit!=0 -k su-fail
 -a always,exit -F arch=b64 -S execve -F path=/bin/su -F exit!=0 -k su-fail
+-a always,exit -F arch=b32 -S execve -F path=/usr/bin/su -F exit!=0 -k su-fail
 -a always,exit -F arch=b64 -S execve -F path=/usr/bin/su -F exit!=0 -k su-fail
 
 # Sikertelen SUDO kísérletek rögzítése
+-a always,exit -F arch=b32 -S execve -F path=/usr/bin/sudo -F exit!=0 -k sudo-fail
 -a always,exit -F arch=b64 -S execve -F path=/usr/bin/sudo -F exit!=0 -k sudo-fail
 
-# Login/User management események (felhasználói adatok olvasása)
+# Login/User management események (sikertelen kísérletek)
+# **JAVÍTÁS: Explicit success=0 (sikertelen) figyelése az openat-nál.**
+-a always,exit -F arch=b32 -S openat -F dir=/var/log/tallylog -F success=0 -k login-fail
 -a always,exit -F arch=b64 -S openat -F dir=/var/log/tallylog -F success=0 -k login-fail
+-a always,exit -F arch=b32 -S openat -F dir=/var/log/lastlog -F success=0 -k login-fail
 -a always,exit -F arch=b64 -S openat -F dir=/var/log/lastlog -F success=0 -k login-fail
 
-# 4. Rendszerhívások figyelése (a jogosultsági modell megsértése)
+# 5. Rendszerhívások figyelése (jogosultsági modell megsértése)
 # Minden jogosultságot igénylő rendszerhívás figyelése
+# **JAVÍTÁS: Duplikált arch=b32.**
+-a always,exit -F arch=b32 -S setuid -S setgid -S setgroups -S setresuid -S setresgid -S setfsuid -S setfsgid -k privilege-change
 -a always,exit -F arch=b64 -S setuid -S setgid -S setgroups -S setresuid -S setresgid -S setfsuid -S setfsgid -k privilege-change
 
-# 5. Immutability (A szabályok után!)
+# 6. Immutability (A szabályok után!)
 -e 2
 EOF
 chmod 0640 "$RULES_FILE"
 
-# --- 3. AUDITD SZABÁLYOK BETÖLTÉSE ---
-log "[ACTION] Auditd szabályok betöltése a kerneltől."
+# --- 3. AUDITD SZABÁLYOK BETÖLTÉSE ÉS LEZÁRÁSA (COMMIT) ---
+log "3. Auditd szabályok betöltése és fájl lezárása."
 if command -v augenrules >/dev/null 2>&1; then
-    /sbin/augenrules --load
+    /sbin/augenrules --load
 else
-    log "[WARNING] augenrules nem található. Auditd szolgáltatás újraindítása..."
-    service auditd restart || /etc/init.d/auditd restart || true
+    log "[ACTION] augenrules nem található. Auditd szolgáltatás újraindítása (SysV init)."
+    # **KRITIKUS JAVÍTÁS: Eltávolítva a || true a szolgáltatás újraindításáról!**
+    service auditd restart || /etc/init.d/auditd restart
 fi
 
-log "[DONE] 08-as ág befejezve. Kritikus Auditd szabályok beállítva."
+# **JAVÍTÁS: Fájl lezárása (chattr +i)**
+if command -v chattr &> /dev/null; then
+    chattr +i "$RULES_FILE"
+    log "[COMMIT] $RULES_FILE lezárva (chattr +i)."
+fi
+
+# Töröljük a sikeres futás után a backupot
+rm -f "$RULES_FILE_BACKUP"
+
+log "[DONE] 08-as ág befejezve. Kritikus Auditd szabályok beállítva és lezárva."
 exit 0
