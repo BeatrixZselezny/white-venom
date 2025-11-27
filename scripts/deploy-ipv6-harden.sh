@@ -4,7 +4,7 @@
 # TARGET default: /target  (Debian installer chroot target)
 TARGET=${1:-/target}
 
-echo "Out‑of‑Avalon IPv6 hardening deploy to $TARGET"
+echo "White Venom IPv6 hardening deploy to $TARGET"
 
 # 1) könyvtárak
 mkdir -p "$TARGET"/etc/sysctl.d
@@ -12,8 +12,8 @@ mkdir -p "$TARGET"/etc/iptables
 mkdir -p "$TARGET"/etc/network/if-pre-up.d
 
 # 2) sysctl file - tiltjuk a router advert/auto-config funkciókat, engedélyezzük a forwardingot csak ha explicit kell (alap: 0)
-cat > "$TARGET"/etc/sysctl.d/99-out-off-avalon.conf <<'EOF'
-# Out‑of‑Avalon IPv6 hardening
+cat > "$TARGET"/etc/sysctl.d/99-white-venom-ipv6.conf <<'EOF'
+# White Venom IPv6 hardening
 # Ne engedjük, hogy a host automatikusan RA/Autoconf elfogadjon / ne legyen "default router"
 net.ipv6.conf.all.autoconf = 0
 net.ipv6.conf.default.autoconf = 0
@@ -107,9 +107,8 @@ EOF
 
 # 6) ha célrendszer chrootolható, írjuk be az apt csomagokra vonatkozó javaslatot (opcionális)
 # (nem telepít semmit, csak javaslat hogy a targeten legyen iptables csomag)
-echo "A perzisztens fájlok létrehozva a célrendszeren."
-echo "Ne felejtsd el a célrendszeren telepíteni: iptables/ip6tables vagy iptables-persistent (ha nincs internet a telepítésnél, később telepítsd)."
-
+echo "A perzisztens fájlok létrehozva a célrendszeren." alon to white-venom in README and IPv6 hardening script"echo "Ne felejtsd el a célrendszeren telepíteni: iptables/ip6tables 
+vagy iptables-persistent (ha nincs internet a telepítésnél, később telepítsd)." git push
 # 7) opció: azonnali teszt a futó kernelre (installer alatt futtatva)
 if [ "$TARGET" = "/target" ]; then
   if command -v ip6tables-restore >/dev/null 2>&1; then
@@ -123,11 +122,11 @@ if [ "$TARGET" = "/target" ]; then
     echo "Teszt: sysctl --system felhívása célfájlra"
     # A telepítő környezet nem biztos, hogy sysctl --system-t támogat; beállításokat egyesével is alkalmazhatod
     # itt csak figyelmeztetünk
-    echo "A beállítások a célrendszerbe kerültek: $TARGET/etc/sysctl.d/99-out-off-avalon.conf"
+    echo "A beállítások a célrendszerbe kerültek: $TARGET/etc/sysctl.d/99-white-venom-ipv6.conf"
   fi
 fi
 
-echo "KÉSZ. A célrendszerbe telepítve: $TARGET/etc/sysctl.d/99-out-off-avalon.conf és $TARGET/etc/iptables/rules.v6"
+echo "KÉSZ. A célrendszerbe telepítve: $TARGET/etc/sysctl.d/99-white-venom-ipv6.conf és $TARGET/etc/iptables/rules.v6"
 echo "A bootloader script: $TARGET/etc/network/if-pre-up.d/load-iptables"
 echo "Ne felejtsd el a célrendszeren telepíteni a szükséges iptables csomagokat és futtatni sysctl --system."
 exit 0

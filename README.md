@@ -1,6 +1,6 @@
 
 # Debian Security Hardening Bootstrap
-## Repository: out-off-avalon
+## Repository: white-venom
 
 
 Automatizált rendszerkeményítés Debian-alapú környezetekhez.
@@ -67,7 +67,7 @@ Ez a projekt a [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 Intern
 Ez azt jelenti, hogy:
 
 - A tartalom szabadon másolható, módosítható és terjeszthető **nem kereskedelmi célra**
-- A szerző (out-off-avalon) nevét minden felhasználásnál fel kell tüntetni
+- A szerző (white-venom) nevét minden felhasználásnál fel kell tüntetni
 - Módosított verziók csak ugyanezen licenc alatt terjeszthetők
 
 **Kereskedelmi célú felhasználás, értékesítés vagy integráció fizetős szolgáltatásba tilos.**
