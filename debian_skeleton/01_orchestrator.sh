@@ -15,6 +15,16 @@ ALL_SCRIPTS=$(find . -maxdepth 1 -type f -name '[0-9][0-9]_*.sh' | sort)
 
 # --- SEGÉDFÜGGVÉNYEK ---
 mkdir -p "$LOGDIR" || true
+# --- SCRIPT LIST BETÖLTÉSE ---
+SCRIPT_LIST_FILE="./scripts/scripts.list"
+
+if [[ ! -f "$SCRIPT_LIST_FILE" ]]; then
+    log "HIBA: scripts.list nem található: $SCRIPT_LIST_FILE"
+    exit 1
+fi
+
+readarray -t SCRIPT_ORDER < "$SCRIPT_LIST_FILE"
+
 log() { echo "$(date +%F' '%T) [01_ORCHESTRATOR] $*" | tee -a "$LOGDIR/01_install_$TIMESTAMP.log"; }
 
 on_err() {
@@ -53,55 +63,54 @@ esac
 
 
 # A szekvenciális végrehajtó
+
 run_scripts() {
-    local script_mode=$1
-    local total_scripts=$(echo "$ALL_SCRIPTS" | wc -l)
-    local current_count=0
-    
-    for script_path in $ALL_SCRIPTS; do
-        script_name=$(basename "$script_path")
+    local mode="$1"
+    local count=0
+    local total="${#SCRIPT_ORDER[@]}"
 
-        # Exkludáljuk önmagunkat
-        if [ "$script_name" == "01_orchestrator.sh" ]; then
-            continue
-        fi
+    for path in "${SCRIPT_ORDER[@]}"; do
+        local name=$(basename "$path")
 
-        current_count=$((current_count + 1))
-        
-        # 1. Speciális fázisok kezelése (--audit, --snapshot)
-        if [ "$MODE" == "--audit" ]; then
-            if [ "$script_name" != "28_reconciliation_audit.sh" ]; then
-                continue # Csak az audit szkript futhat
-            fi
-        fi
-        
-        if [ "$MODE" == "--snapshot" ]; then
-            if [ "$script_name" != "29_system_baseline_snapshot.sh" ]; then
-                continue # Csak a snapshot szkript futhat
-            fi
-        fi
-        
-        # 2. --dry-run és --apply mód (Minden szkript 28-ig)
-        if [ "$MODE" == "--dry-run" ] || [ "$MODE" == "--apply" ]; then
-            # Kizárjuk a 28 és 29-es audit/snapshot szkripteket
-            if [[ "$script_name" == "28_reconciliation_audit.sh" ]] || [[ "$script_name" == "29_system_baseline_snapshot.sh" ]]; then
-                continue 
-            fi
-        fi
-        
-        # FUTTATÁS
-        log "FUTTATÁS [$current_count/$total_scripts]: $script_name $script_mode"
-        
-        # Átadjuk az argumentumot a szkriptnek
-        "$script_path" "$script_mode" || {
-            log "KRITIKUS HIBA: $script_name hibával zárult ($?). Megszakítás."
-            return 1
-        }
+        case "$mode" in
+            --audit)
+                [[ "$name" != "28_reconciliation_audit.sh" ]] && continue
+                ;;
+            --snapshot)
+                [[ "$name" != "29_system_baseline_snapshot.sh" ]] && continue
+                ;;
+            --dry-run|--apply)
+                [[ "$name" == "28_reconciliation_audit.sh" || "$name" == "29_system_baseline_snapshot.sh" ]] && continue
+                ;;
+        esac
+
+        count=$((count + 1))
+        log "FUTTATÁS [$count/$total]: $name $mode"
+        "$path" "$mode"
     done
 }
+
 
 # --- FUTTATÁS ---
 run_scripts "$MODE"
 
 log "VÉGE: A FÁZIS ($MODE) befejeződött."
 exit 0
+
+# --- hw_vuln_inject.sh integrálás ---
+HW_VULN_SCRIPT="./scripts/hw_vuln_inject.sh"
+
+if [[ "$1" == "--dry-run" ]]; then
+    log "Dry-run módban futtatva. A hw_vuln_inject.sh szkript nem lesz végrehajtva, csak naplózva."
+    echo "A következő műveletek nem kerülnek végrehajtásra:"
+    echo "Hozzáadott mitigációs paraméterek a kernelhez: $KERNEL_OPTS $SMT_OPTS"
+else
+    # Futtatjuk a hw_vuln_inject.sh szkriptet
+    if [[ -f "$HW_VULN_SCRIPT" ]]; then
+        log "Futtatjuk a hw_vuln_inject.sh szkriptet."
+        bash "$HW_VULN_SCRIPT"
+    else
+        log "HIBA: hw_vuln_inject.sh szkript nem található!"
+        exit 1
+    fi
+fi
