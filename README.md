@@ -3,7 +3,7 @@
 ## Repository: white-venom
 
 
-Automatizált rendszerkeményítés Debian-alapú környezetekhez.
+SecurityDebian-bootstrap hardening with orchectrator.
 
 ## Cél
 
@@ -15,17 +15,18 @@ Ez a projekt egy shell-alapú bootstrap script, amely Debian 11/12 rendszerek bi
   - `PermitRootLogin no`
   - `PasswordAuthentication no`
   - `MaxAuthTries`, `LoginGraceTime`, `AllowUsers` beállítások
-- `sysctl` kernel paraméterek:
-  - IP forwarding tiltása
-  - ICMP redirect-ek tiltása
-  - Source routing tiltása
-  - TCP SYN cookies engedélyezése
+- `sysctl` kernel security paraméterek:
+  - Kernel
+  - Networking
+  - FS
 - `auditd` telepítése és alapértelmezett szabályok betöltése
-- Felesleges csomagok és szolgáltatások eltávolítása (pl. `telnet`, `rsh`, `xinetd`)
+- Mamória védelem - Canary
+- Strict minimal install (pl. `telnet`, `rsh`, `xinetd`)
+- Dpkg-APT minimalizált hardening
 - Journald és logrotate konfiguráció megerősítése
-- Fail2ban előkonfiguráció SSH brute force elleni védelemhez
 - Alapértelmezett tűzfal (iptables/nftables) szabályok inicializálása
-- DNS és NTP forgalom explicit engedélyezése (opcionális whitelistelés)
+- DNS hardening QUAD9
+- NTP hardening, szoftveres és hardveres óra biztonsági konfiguráció
 
 ## Használat
 
