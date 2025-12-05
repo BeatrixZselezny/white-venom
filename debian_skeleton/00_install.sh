@@ -4,12 +4,60 @@
 #   0.00 – Environment sterilization
 #   0.15 – Network + kernel/fs lockdown (sysctl)
 #   1.0  – GRUB env tool + kernelopts baseline
+#   1.5  – Zero-Trust: Systemd Csomagrögzítés (APT Pinning)
 #   2.0  – APT toolchain + memguard deps + security baseline
 #   3.0  – ldconfig sanity
 #   4.0  – Baseline dirs
 #   5.0  – Canary
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# GLOBAL KONFIGURÁCIÓK ÉS ROLLBACK CÉLOK
+# ---------------------------------------------------------------------------
+
+# 🛠️ A szkript által létrehozott kritikus fájlok, amiket rollbackelni kell
+NET_SYSCTL_FILE="/etc/sysctl.d/00_whitevenom_bootstrap.conf"
+SYSTEMD_PREF_FILE="/etc/apt/preferences.d/99systemd-noinstall"
+
+# ---------------------------------------------------------------------------
+# LOG FUNKCIÓ
+# ---------------------------------------------------------------------------
+
+SCRIPT_NAME="00_INSTALL"
+
+log() {
+    local level="$1"; shift
+    local msg="$*"
+    printf "%s [%s] %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$SCRIPT_NAME/$level" "$msg"
+}
+
+# ---------------------------------------------------------------------------
+# 🛡️ JAVÍTÁS: ROLLBACK FÜGGVÉNY ÉS TRAP ERR
+# ---------------------------------------------------------------------------
+branch_cleanup() {
+    log "FATAL" "Hiba történt a 00_install.sh futása közben! Rollback indítása..."
+
+    # 1.5: Systemd Pinning fájl törlése
+    if [ -f "$SYSTEMD_PREF_FILE" ]; then
+        chattr -i "$SYSTEMD_PREF_FILE" 2>/dev/null || true
+        run rm -f "$SYSTEMD_PREF_FILE"
+        log "INFO" "Rollback: $SYSTEMD_PREF_FILE törölve."
+    fi
+
+    # 0.15: Sysctl fájl törlése
+    if [ -f "$NET_SYSCTL_FILE" ]; then
+        chattr -i "$NET_SYSCTL_FILE" 2>/dev/null || true
+        run rm -f "$NET_SYSCTL_FILE"
+        log "INFO" "Rollback: $NET_SYSCTL_FILE törölve."
+    fi
+
+    log "FATAL" "A szkript futása megszakadt."
+    exit 1
+}
+
+# Trap beállítása: minden nem nulla visszatérési kód esetén (set -e miatt) lefut a branch_cleanup
+trap branch_cleanup ERR
 
 # ---------------------------------------------------------------------------
 # 0.00 – Environment sterilization (prevent env-based root compromise)
@@ -56,14 +104,6 @@ done
 export LANG=C
 export LC_ALL=C
 
-SCRIPT_NAME="00_INSTALL"
-
-log() {
-    local level="$1"; shift
-    local msg="$*"
-    printf "%s [%s] %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$SCRIPT_NAME/$level" "$msg"
-}
-
 # ---------------------------------------------------------------------------
 # 0.0 – Root check
 # ---------------------------------------------------------------------------
@@ -78,7 +118,7 @@ fi
 MODE="${1:---apply}"
 
 case "$MODE" in
-    --apply)   DRY_RUN=0 ;;
+    --apply)    DRY_RUN=0 ;;
     --dry-run) DRY_RUN=1 ;;
     *)
         log "FATAL" "Unknown mode: $MODE"
@@ -98,11 +138,21 @@ run() {
 log "INFO" "Mode: $MODE"
 
 # ---------------------------------------------------------------------------
+# 0.17 – JAVÍTÁS: Unwanted services immediate disable (exim4 - Systemd-free)
+# ---------------------------------------------------------------------------
+log "INFO" "Disabling unwanted services (exim4 - Systemd-free)..."
+
+# 📧 Exim4 azonnali leállítása. /etc/init.d közvetlen hívása SysVinit módon
+/etc/init.d/exim4 stop 2>/dev/null || log "WARN" "exim4 stop failed (likely not installed)"
+
+# A futási szintekről való eltávolítás, hogy ne induljon el a következő bootoláskor.
+run update-rc.d exim4 remove 2>/dev/null || log "WARN" "exim4 disable failed (likely not installed/configured)"
+
+# ---------------------------------------------------------------------------
 # 0.15 – Bootstrap Network + Kernel/FS Lockdown
 # ---------------------------------------------------------------------------
 log "INFO" "Bootstrap network + kernel/fs lockdown..."
 
-NET_SYSCTL_FILE="/etc/sysctl.d/00_whitevenom_bootstrap.conf"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY" "Would write $NET_SYSCTL_FILE with IPv4 + fs + kernel lockdown sysctls"
@@ -116,46 +166,28 @@ else
 
     cat > "$NET_SYSCTL_FILE" << 'EOF'
 # White Venom – Bootstrap IPv4 + kernel/fs hardening lockdown
-
-# --- IPv4 routing / redirect / spoofing ---
+# ... (sysctl beállítások) ...
 net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
-
 net.ipv4.conf.all.send_redirects = 0
 net.ipv4.conf.default.send_redirects = 0
-
 net.ipv4.conf.all.secure_redirects = 1
 net.ipv4.conf.default.secure_redirects = 1
-
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
-
-# Loopback bypass protection
 net.ipv4.conf.all.accept_local = 0
 net.ipv4.conf.default.accept_local = 0
-
-# Strict anti-spoofing
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
-
-# Stable routing behaviour while IPv4 still active
 net.ipv4.conf.all.shared_media = 0
 net.ipv4.conf.default.shared_media = 0
-
-# --- Filesystem local-priv-esc shields ---
 fs.protected_symlinks = 1
 fs.protected_hardlinks = 1
 fs.protected_fifos = 1
 fs.protected_regular = 1
-
-# --- Kernel info-leak / debug surface ---
 kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
-
-# --- Yama ptrace baseline (Debian Trixie: /proc/sys/kernel/yama/ptrace_scope) ---
 kernel.yama.ptrace_scope = 1
-
-# --- BPF exploitation surface ---
 kernel.unprivileged_bpf_disabled = 1
 EOF
 
@@ -185,7 +217,6 @@ if command -v grub-editenv >/dev/null 2>&1; then
 elif command -v grub2-editenv >/dev/null 2>&1; then
     GRUBENV_CMD="grub2-editenv"
 else
-    # nincs grub env tool → telepítjük
     if [[ "$DRY_RUN" -eq 1 ]]; then
         log "DRY" "Would run: apt update -y"
         log "DRY" "Would run: apt install -y --no-install-recommends grub-common grub2-common"
@@ -240,18 +271,43 @@ ensure_kernelopts() {
 ensure_kernelopts
 
 # ---------------------------------------------------------------------------
+# 1.5 – JAVÍTÁS: Zero-Trust: Systemd Csomagrögzítés (APT Pinning)
+# ---------------------------------------------------------------------------
+log "INFO" "Applying APT Pinning to prevent Systemd installation (Priority -1)..."
+
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    run mkdir -p /etc/apt/preferences.d || log "WARN" "/etc/apt/preferences.d already exists or mkdir failed."
+
+    cat > "$SYSTEMD_PREF_FILE" << EOF
+# Blokkolja a Systemd komponensek telepítését a Zero-Trust elv miatt.
+Package: systemd systemd-sysv libsystemd0 udev
+Pin: release *
+Pin-Priority: -1
+
+Package: *systemd*
+Pin: release *
+Pin-Priority: -1
+EOF
+
+    run chmod 644 "$SYSTEMD_PREF_FILE"
+    log "INFO" "APT Pinning file $SYSTEMD_PREF_FILE created successfully."
+else
+    log "DRY" "Would create APT Pinning file to block Systemd."
+fi
+
+
+# ---------------------------------------------------------------------------
 # 2.0 – APT update + toolchain + memguard deps + security baseline
 # ---------------------------------------------------------------------------
 run apt update -y
 
+# 📦 JAVÍTÁS: Töröltük a git-et és a vim-nox-ot.
 ESSENTIAL_PKGS=(
     build-essential
     gcc
     make
-    git
     curl
     wget
-    vim-nox
     ca-certificates
     gnupg
     pkg-config
@@ -294,7 +350,8 @@ ld_paths_sanity_check() {
 
     while IFS= read -r path; do
         [[ -z "$path" || ! -d "$path" ]] && continue
-        run find "$path" -maxdepth 1 -type f -perm -0002 -print >> "$LD_LOG" || true
+        # ⚠️ JAVÍTÁS: Eltávolítva a || true a find parancsról!
+        run find "$path" -maxdepth 1 -type f -perm -0002 -print >> "$LD_LOG"
     done <<< "$lib_paths"
 
     if [[ -s "$LD_LOG" ]]; then

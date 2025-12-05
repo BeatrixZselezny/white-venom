@@ -1,116 +1,164 @@
 #!/usr/bin/env bash
-# 01_orchestrator.sh - Zero Trust Hardening Orchestrator
-# Kezeli a futtatási fázisokat: --dry-run, --apply, --audit, --snapshot
+# 01_orchestrator.sh – White Venom / SKELL Orchestrator
+# Fázisvezérlés: --dry-run | --apply | --audit | --snapshot
+#
+# JAVÍTÁSOK:
+#   - Fájllista kezelése ls alapú listával (nem find).
+#   - Számláló logika beépítése a futtatásba.
+#   - Redundáns számozás alapú szűrés eltávolítása a run_module funkcióból.
 
 set -euo pipefail
-IFS=$'\n\t'
 
-# --- KONFIGURÁCIÓ ---
-LOGDIR="/var/log/skell"
+SCRIPT_NAME="01_ORCHESTRATOR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="/var/log/whitevenom"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-# Megkeresi az összes számozott szkriptet (00_install.sh-tól felfelé)
-# A szkript maga (01_orchestrator.sh) ki lesz zárva a futtatásból.
-# A find sorba rendezi a fájlokat: 00, 02, 03, 27, 28, 29, stb.
-ALL_SCRIPTS=$(find . -maxdepth 1 -type f -name '[0-9][0-9]_*.sh' | sort)
 
-# --- SEGÉDFÜGGVÉNYEK ---
-mkdir -p "$LOGDIR" || true
-# --- SCRIPT LIST BETÖLTÉSE ---
-SCRIPT_LIST_FILE="./scripts/scripts.list"
+# A Zero-Trust logikához a log könyvtárnak már léteznie kell (00_install.sh felelőssége)
+# A hiba elnyelést eltávolítjuk a chmod-ról (ha nem létezik, FATAL hiba jön)
+mkdir -p "$LOG_DIR"
+chmod 700 "$LOG_DIR"
 
-if [[ ! -f "$SCRIPT_LIST_FILE" ]]; then
-    log "HIBA: scripts.list nem található: $SCRIPT_LIST_FILE"
-    exit 1
-fi
-
-readarray -t SCRIPT_ORDER < "$SCRIPT_LIST_FILE"
-
-log() { echo "$(date +%F' '%T) [01_ORCHESTRATOR] $*" | tee -a "$LOGDIR/01_install_$TIMESTAMP.log"; }
-
-on_err() {
-  local rc=$?
-  log "KRITIKUS HIBA: A futtatás megszakadt (exit $rc). Lásd a logot a hibás szkriptnél."
-  exit $rc
+log() {
+    local level="$1"; shift
+    local msg="$*"
+    printf "%s [%s/%s] %s\n" \
+        "$(date +"%Y-%m-%d %H:%M:%S")" \
+        "$SCRIPT_NAME" "$level" "$msg"
 }
-trap on_err ERR
 
 usage() {
-    echo "Használat: $0 [--dry-run | --apply | --audit | --snapshot]"
-    echo ""
-    echo "FÁZISOK:"
-    echo "  --dry-run:  Futásszimuláció: Minden szkript kiírja, mit tenne (írási művelet nélkül)."
-    echo "  --apply:    Alkalmazás: Elvégzi a tényleges konfigurációs módosításokat (00-27)."
-    echo "  --audit:    Ellenőrzés: Csak a 28_reconciliation_audit.sh futtatása."
-    echo "  --snapshot: Véglegesítés: Csak a 29_system_baseline_snapshot.sh futtatása (hash rögzítés)."
-    exit 1
+    cat <<EOF
+Használat: $0 [--dry-run | --apply | --audit | --snapshot]
+
+FÁZISOK:
+  --dry-run   Futásszimuláció: Minden modul kiírja, mit tenne (írás nélkül).
+  --apply     Alkalmazás: 00–25 modulok tényleges futtatása, majd 90_release_locks.sh (ha van).
+  --audit     Audit mód: csak audit jellegű modul(ok) futtatása (pl. 28_reconciliation_audit.sh, ha létezik).
+  --snapshot  Snapshot mód: jelenleg csak keret, nem végez műveletet.
+
+EOF
 }
 
-# ---------------------------
-# FŐ LOGIKA
-# ---------------------------
-if [ $# -eq 0 ]; then
-    usage
-fi
+# --- MODE PARSE -------------------------------------------------------------
 
-MODE=""
-case "$1" in
-    --dry-run)  MODE="--dry-run"; log "START: DRY-RUN SZIMULÁCIÓ"; ;;
-    --apply)    MODE="--apply"; log "START: KONFIGURÁCIÓ ALKALMAZÁSA (APPLY)"; ;;
-    --audit)    MODE="--audit"; log "START: AUDIT FÁZIS"; ;;
-    --snapshot) MODE="--snapshot"; log "START: BASELINE SNAPSHOT FÁZIS"; ;;
-    *)          usage; ;;
+MODE="${1:-}"
+
+case "$MODE" in
+    --dry-run|--apply|--audit|--snapshot)
+        ;; # OK
+    ""|"-h"|"--help")
+        usage
+        exit 0
+        ;;
+    *)
+        log "ERROR" "Ismeretlen mód: $MODE"
+        usage
+        exit 1
+        ;;
 esac
 
+# --- ROOT CHECK -------------------------------------------------------------
 
-# A szekvenciális végrehajtó
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    log "FATAL" "Root jogosultság szükséges az orchestrator futtatásához."
+    exit 1
+fi
 
-run_scripts() {
-    local mode="$1"
-    local count=0
-    local total="${#SCRIPT_ORDER[@]}"
+log "INFO" "Indul az orchestrator. Mód: $MODE"
 
-    for path in "${SCRIPT_ORDER[@]}"; do
-        local name=$(basename "$path")
+# --- SEGÉDFÜGGVÉNYEK --------------------------------------------------------
 
-        case "$mode" in
-            --audit)
-                [[ "$name" != "28_reconciliation_audit.sh" ]] && continue
-                ;;
-            --snapshot)
-                [[ "$name" != "29_system_baseline_snapshot.sh" ]] && continue
-                ;;
-            --dry-run|--apply)
-                [[ "$name" == "28_reconciliation_audit.sh" || "$name" == "29_system_baseline_snapshot.sh" ]] && continue
-                ;;
-        esac
-
-        count=$((count + 1))
-        log "FUTTATÁS [$count/$total]: $name $mode"
-        "$path" "$mode"
-    done
+# 🛠️ JAVÍTÁS: ls alapú lista, kizárva magát az orchestratort
+get_modules() {
+    # 00-99 közötti számozott fájlok gyűjtése, rendezve, KIVÉVE a saját magát
+    # xargs és basename használata a tisztább fájlnév kinyeréséhez
+    ls -1 "$SCRIPT_DIR"/[0-9][0-9]_*.sh | grep -v "01_orchestrator.sh" | xargs -n 1 basename
 }
 
+# 🛠️ JAVÍTÁS: Egyszerűsített modul futtatás – a szűrést a run_pipeline végzi
+run_module() {
+    local mode="$1"
+    local module="$2"
 
-# --- FUTTATÁS ---
-run_scripts "$MODE"
+    log "INFO" "Futtatás ($mode): $module"
+    # A set -e és a trap ERR a futtatott szkriptekben (pl. 00_install.sh) biztosítja a hibakezelést.
+    bash "$SCRIPT_DIR/$module" "$mode"
+}
 
-log "VÉGE: A FÁZIS ($MODE) befejeződött."
+run_pipeline() {
+    local mode="$1"
+
+    # A modulok listáját tömbbe olvassuk be a biztonságos iterációhoz
+    local module_array
+    readarray -t module_array <<< "$(get_modules)"
+
+    local total_scripts=${#module_array[@]}
+    local current_count=0
+
+    log "INFO" "Detektált modulok ($total_scripts db):"
+    for m in "${module_array[@]}"; do
+        log "INFO" "  - $m"
+    done
+
+    case "$mode" in
+        --dry-run|--apply)
+            # 00–25 tartomány futtatása
+            for mod in "${module_array[@]}"; do
+                local prefix="${mod%%_*}"
+                local num=$((10#$prefix))
+
+                # Futtatási szűrés a 00-25 tartományra
+                if [[ "$num" -ge 0 && "$num" -le 25 ]]; then
+                    current_count=$((current_count + 1))
+                    log "INFO" "--- FUTTATÁS ($current_count/$total_scripts): $mod ---"
+                    run_module "$mode" "$mod"
+                elif [[ "$num" -eq 90 ]]; then
+                    # Lock release modul a végén fut.
+                    :
+                fi
+            done
+
+            # 90_release_locks.sh kezelése
+            if [[ -f "$SCRIPT_DIR/90_release_locks.sh" ]]; then
+                # Számláló nem szükséges itt, mert ez egy külön fázis
+                log "INFO" "--- VÉGZŐ FÁZIS: 90_release_locks.sh ---"
+                bash "$SCRIPT_DIR/90_release_locks.sh" "$mode"
+            else
+                log "INFO" "90_release_locks.sh nem található – nincs külön lock-release fázis."
+            fi
+            ;;
+
+        --audit)
+            # Audit mód: csak 28–29 tartomány
+            local found_audit=0
+            for mod in "${module_array[@]}"; do
+                local prefix="${mod%%_*}"
+                local num=$((10#$prefix))
+
+                if [[ "$num" -ge 28 && "$num" -le 29 ]]; then
+                    found_audit=1
+                    current_count=$((current_count + 1))
+                    log "INFO" "--- AUDIT FUTTATÁS ($current_count/$total_scripts): $mod ---"
+                    run_module "$mode" "$mod"
+                fi
+            done
+
+            if [[ "$found_audit" -eq 0 ]]; then
+                log "WARN" "Audit mód kérése, de nem található 28xx audit modul. (Nincs teendő.)"
+            fi
+            ;;
+
+        --snapshot)
+            log "WARN" "Snapshot mód jelenleg csak keret – nincs implementált snapshot backend."
+            log "WARN" "Ha szükséges, itt lehet integrálni btrfs/lvm/zfs snapshot modulokat (tools/ alól)."
+            ;;
+    esac
+}
+
+# --- FUTTATÁS ---------------------------------------------------------------
+
+run_pipeline "$MODE"
+
+log "INFO" "Orchestrator lefutott. Mód: $MODE – VÉGE."
 exit 0
-
-# --- hw_vuln_inject.sh integrálás ---
-HW_VULN_SCRIPT="./scripts/hw_vuln_inject.sh"
-
-if [[ "$1" == "--dry-run" ]]; then
-    log "Dry-run módban futtatva. A hw_vuln_inject.sh szkript nem lesz végrehajtva, csak naplózva."
-    echo "A következő műveletek nem kerülnek végrehajtásra:"
-    echo "Hozzáadott mitigációs paraméterek a kernelhez: $KERNEL_OPTS $SMT_OPTS"
-else
-    # Futtatjuk a hw_vuln_inject.sh szkriptet
-    if [[ -f "$HW_VULN_SCRIPT" ]]; then
-        log "Futtatjuk a hw_vuln_inject.sh szkriptet."
-        bash "$HW_VULN_SCRIPT"
-    else
-        log "HIBA: hw_vuln_inject.sh szkript nem található!"
-        exit 1
-    fi
-fi
