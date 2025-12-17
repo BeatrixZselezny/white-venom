@@ -67,14 +67,14 @@ if [ -f "$PG_CONFIG_HBA" ]; then
     
     cat > "$PG_CONFIG_HBA" <<'EOF'
 # Helyi kommunikáció (Unix socket) - KIZÁRÓLAG RENDSZERFELHASZNÁLÓ NEVE ALAPJÁN (Zero Trust: Peer)
-local   all             all                                     peer
+local   all             all                                     peer
 # IPv4 helyi kapcsolatok - Jelszó kényszerítése (MD5)
-host    all             all             127.0.0.1/32            md5
+host    all             all             127.0.0.1/32            md5
 # IPv6 helyi kapcsolatok - Jelszó kényszerítése (MD5)
-host    all             all             ::1/128                 md5
+host    all             all             ::1/128                 md5
 # Minden egyéb TCP/IP kapcsolat TILTVA! (Zero Trust: Reject)
-host    all             all             0.0.0.0/0               reject
-host    all             all             ::/0                    reject
+host    all             all             0.0.0.0/0               reject
+host    all             all             ::/0                    reject
 EOF
 fi
 

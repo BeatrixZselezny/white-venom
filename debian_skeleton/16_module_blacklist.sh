@@ -98,12 +98,12 @@ chmod 644 "$BLACKLIST_FILE"
 # ------------------------------------------------------------------
 log "[ACTION] Próbálkozás a letiltott modulok eltávolításával (rmmod)."
 for mod in $(awk '/^blacklist/ {print $2}' "$BLACKLIST_FILE"); do
-    if lsmod | grep -q "^$mod"; then
+    if lsmod | grep -q "^$mod"; then
         # **JAVÍTÁS: Eltávolítjuk a 2>/dev/null-t, hogy a set -e aktiválódjon, ha a modprobe hibázik.**
         # A `|| true` itt sem használható, mert az elnyelné a hibát!
         log "   -> Eltávolítás: $mod"
         modprobe -r "$mod" || log "[FIGYELEM] Nem sikerült eltávolítani a modult: $mod (használatban vagy védett)"
-    fi
+    fi
 done
 
 # ------------------------------------------------------------------

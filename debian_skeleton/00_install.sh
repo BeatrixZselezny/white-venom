@@ -4,7 +4,7 @@
 #   0.00 – Environment sterilization
 #   0.15 – Network + kernel/fs lockdown (sysctl)
 #   1.0  – GRUB env tool + kernelopts baseline
-#   1.5  – Zero-Trust: Systemd Csomagrögzítés (APT Pinning)
+#   1.5  – [DISABLED] Zero-Trust: Systemd Csomagrögzítés (APT Pinning)  # handled by 05 hook
 #   2.0  – APT toolchain + memguard deps + security baseline
 #   3.0  – ldconfig sanity
 #   4.0  – Baseline dirs
@@ -18,8 +18,8 @@ set -euo pipefail
 
 # 🛠️ A szkript által létrehozott kritikus fájlok, amiket rollbackelni kell
 NET_SYSCTL_FILE="/etc/sysctl.d/00_whitevenom_bootstrap.conf"
-SYSTEMD_PREF_FILE="/etc/apt/preferences.d/99systemd-noinstall"
-
+# SYSTEMD_PREF_FILE="/etc/apt/preferences.d/99systemd-noinstall"
+# NOTE: Systemd pinning is disabled here; enforcement is handled by 05_dpkg_apt_hardening (APT pre-install hook).
 # ---------------------------------------------------------------------------
 # LOG FUNKCIÓ
 # ---------------------------------------------------------------------------
@@ -37,15 +37,14 @@ log() {
 # ---------------------------------------------------------------------------
 branch_cleanup() {
     log "FATAL" "Hiba történt a 00_install.sh futása közben! Rollback indítása..."
-
-    # 1.5: Systemd Pinning fájl törlése
-    if [ -f "$SYSTEMD_PREF_FILE" ]; then
-        chattr -i "$SYSTEMD_PREF_FILE" 2>/dev/null || true
-        run rm -f "$SYSTEMD_PREF_FILE"
-        log "INFO" "Rollback: $SYSTEMD_PREF_FILE törölve."
-    fi
-
-    # 0.15: Sysctl fájl törlése
+# 
+#     # 1.5: Systemd Pinning fájl törlése
+#     if [ -f "$SYSTEMD_PREF_FILE" ]; then
+#         chattr -i "$SYSTEMD_PREF_FILE" 2>/dev/null || true
+#         run rm -f "$SYSTEMD_PREF_FILE"
+#         log "INFO" "Rollback: $SYSTEMD_PREF_FILE törölve."
+#     fi
+#     # 0.15: Sysctl fájl törlése
     if [ -f "$NET_SYSCTL_FILE" ]; then
         chattr -i "$NET_SYSCTL_FILE" 2>/dev/null || true
         run rm -f "$NET_SYSCTL_FILE"
@@ -273,30 +272,29 @@ ensure_kernelopts
 # ---------------------------------------------------------------------------
 # 1.5 – JAVÍTÁS: Zero-Trust: Systemd Csomagrögzítés (APT Pinning)
 # ---------------------------------------------------------------------------
-log "INFO" "Applying APT Pinning to prevent Systemd installation (Priority -1)..."
-
-if [[ "$DRY_RUN" -eq 0 ]]; then
-    run mkdir -p /etc/apt/preferences.d || log "WARN" "/etc/apt/preferences.d already exists or mkdir failed."
-
-    cat > "$SYSTEMD_PREF_FILE" << EOF
+# log "INFO" "Applying APT Pinning to prevent Systemd installation (Priority -1)..."
+# 
+# if [[ "$DRY_RUN" -eq 0 ]]; then
+#     run mkdir -p /etc/apt/preferences.d || log "WARN" "/etc/apt/preferences.d already exists or mkdir failed."
+# 
+#     cat > "$SYSTEMD_PREF_FILE" << EOF
 # Blokkolja a Systemd komponensek telepítését a Zero-Trust elv miatt.
-Package: systemd systemd-sysv libsystemd0 udev
-Pin: release *
-Pin-Priority: -1
-
-Package: *systemd*
-Pin: release *
-Pin-Priority: -1
-EOF
-
-    run chmod 644 "$SYSTEMD_PREF_FILE"
-    log "INFO" "APT Pinning file $SYSTEMD_PREF_FILE created successfully."
-else
-    log "DRY" "Would create APT Pinning file to block Systemd."
-fi
-
-
-# ---------------------------------------------------------------------------
+# Package: systemd systemd-sysv libsystemd0 udev
+# Pin: release *
+# Pin-Priority: -1
+# 
+# Package: *systemd*
+# Pin: release *
+# Pin-Priority: -1
+# EOF
+# 
+#     run chmod 644 "$SYSTEMD_PREF_FILE"
+#     log "INFO" "APT Pinning file $SYSTEMD_PREF_FILE created successfully."
+# else
+#     log "DRY" "Would create APT Pinning file to block Systemd."
+# fi
+# 
+# # ---------------------------------------------------------------------------
 # 2.0 – APT update + toolchain + memguard deps + security baseline
 # ---------------------------------------------------------------------------
 run apt update -y
@@ -391,6 +389,180 @@ if [[ ! -f "$CANARY_FILE" ]]; then
     fi
 fi
 
+
+# ---------------------------------------------------------------------------
+# 6.0 – GRUB cmdline hardening inject (primary: /etc/default/grub)
+#       Goal: ensure CPU vuln mitigations are passed to the kernel via grub.cfg
+# ---------------------------------------------------------------------------
+grub_cmdline_hardening_inject() {
+    log "INFO" "GRUB cmdline hardening inject..."
+
+    local TS BACKUP_DIR GRUB_CFG
+    TS="$(date +%Y%m%d-%H%M%S)"
+    BACKUP_DIR="${BASE_BACKUP_DIR}/grub_inject"
+    GRUB_CFG="/etc/default/grub"
+
+    # Canonical mitigation tokens (space-separated, idempotent by key)
+    local WANT_OPTS
+    WANT_OPTS="meltdown=on l1tf=full,force smt=full,nosmt spectre_v2=on spec_store_bypass_disable=seccomp slab_nomerge=yes mce=0 pti=on"
+
+    if [[ ! -f "$GRUB_CFG" ]]; then
+        log "FATAL" "Missing $GRUB_CFG – cannot inject kernel cmdline."
+        exit 57
+    fi
+
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        mkdir -p "$BACKUP_DIR"
+        chmod 700 "$BACKUP_DIR"
+        # Preserve ownership/mode; timestamp is in filename
+        cp -a "$GRUB_CFG" "$BACKUP_DIR/default_grub.bak.$TS" 2>/dev/null || true
+        [[ -f /boot/grub/grubenv ]] && cp -a /boot/grub/grubenv "$BACKUP_DIR/grubenv.bak.$TS" 2>/dev/null || true
+    fi
+
+    # Helpers
+    strip_quotes() {
+        local s="$1"
+        s="${s#\"}"; s="${s%\"}"
+        printf "%s" "$s"
+    }
+
+    sed_escape_repl() {
+        # Escape for sed replacement part (delimiter '|')
+        local s="$1"
+        s="${s//\/\\}"
+        s="${s//&/\&}"
+        s="${s//|/\|}"
+        printf "%s" "$s"
+    }
+
+    get_var_value() {
+        local var="$1"
+        local line
+        line="$(grep -E "^${var}=" "$GRUB_CFG" 2>/dev/null | head -n1 || true)"
+        if [[ -z "$line" ]]; then
+            printf "%s" ""
+            return 0
+        fi
+        strip_quotes "${line#*=}"
+    }
+
+    var_exists() {
+        local var="$1"
+        grep -qE "^${var}=" "$GRUB_CFG" 2>/dev/null
+    }
+
+    set_var_value() {
+        local var="$1"
+        local val="$2"
+        local esc
+        esc="$(sed_escape_repl "$val")"
+
+        if var_exists "$var"; then
+            run sed -i -E "s|^${var}=.*|${var}=\"${esc}\"|" "$GRUB_CFG"
+        else
+            if [[ "$DRY_RUN" -eq 1 ]]; then
+                log "DRY" "Would append: ${var}=\"${val}\" to $GRUB_CFG"
+            else
+                printf '
+%s="%s"
+' "$var" "$val" >> "$GRUB_CFG"
+            fi
+        fi
+    }
+
+    token_key() {
+        local t="$1"
+        if [[ "$t" == *"="* ]]; then
+            printf "%s" "${t%%=*}"
+        else
+            printf "%s" "$t"
+        fi
+    }
+
+    # Build want-keys map
+    declare -A WANT_KEYS
+    local w
+    for w in $WANT_OPTS; do
+        WANT_KEYS["$(token_key "$w")"]=1
+    done
+
+    # Read current values
+    local CUR_LINUX CUR_DEFAULT
+    CUR_LINUX="$(get_var_value GRUB_CMDLINE_LINUX)"
+    CUR_DEFAULT="$(get_var_value GRUB_CMDLINE_LINUX_DEFAULT)"
+
+    # Normalize whitespace
+    CUR_LINUX="$(echo "$CUR_LINUX" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]$//')"
+    CUR_DEFAULT="$(echo "$CUR_DEFAULT" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]$//')"
+
+    # 1) Ensure mitigations live in GRUB_CMDLINE_LINUX (applies to normal + recovery entries)
+    declare -A SEEN
+    local NEW_LINUX="" tok key
+    for tok in $CUR_LINUX; do
+        key="$(token_key "$tok")"
+        if [[ -n "${WANT_KEYS[$key]+x}" ]]; then
+            continue
+        fi
+        NEW_LINUX="$NEW_LINUX $tok"
+        SEEN["$key"]=1
+    done
+    for w in $WANT_OPTS; do
+        key="$(token_key "$w")"
+        if [[ -z "${SEEN[$key]+x}" ]]; then
+            NEW_LINUX="$NEW_LINUX $w"
+            SEEN["$key"]=1
+        fi
+    done
+    NEW_LINUX="$(echo "$NEW_LINUX" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]$//')"
+
+    # 2) Sanitize GRUB_CMDLINE_LINUX_DEFAULT: keep "quiet" and other non-mitigation tokens,
+    #    but remove any mitigation keys to avoid duplicates.
+    local NEW_DEFAULT="" d
+    for d in $CUR_DEFAULT; do
+        key="$(token_key "$d")"
+        if [[ -n "${WANT_KEYS[$key]+x}" ]]; then
+            continue
+        fi
+        NEW_DEFAULT="$NEW_DEFAULT $d"
+    done
+    NEW_DEFAULT="$(echo "$NEW_DEFAULT" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+/ /g' -e 's/[[:space:]]$//')"
+
+    log "INFO" "GRUB_CMDLINE_LINUX (current): ${CUR_LINUX:-<empty>}"
+    log "INFO" "GRUB_CMDLINE_LINUX (new):     ${NEW_LINUX:-<empty>}"
+    log "INFO" "GRUB_CMDLINE_LINUX_DEFAULT (current): ${CUR_DEFAULT:-<empty>}"
+    log "INFO" "GRUB_CMDLINE_LINUX_DEFAULT (new):     ${NEW_DEFAULT:-<empty>}"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        log "DRY" "Would write /etc/default/grub (GRUB_CMDLINE_LINUX + sanitize DEFAULT), then run update-grub."
+        return 0
+    fi
+
+    set_var_value GRUB_CMDLINE_LINUX "$NEW_LINUX"
+    # Only set DEFAULT if it exists OR we already have something to keep; do not force-create it
+    if var_exists GRUB_CMDLINE_LINUX_DEFAULT; then
+        set_var_value GRUB_CMDLINE_LINUX_DEFAULT "$NEW_DEFAULT"
+    fi
+
+    if command -v update-grub >/dev/null 2>&1; then
+        run update-grub
+        log "INFO" "update-grub OK."
+    elif command -v grub-mkconfig >/dev/null 2>&1; then
+        run grub-mkconfig -o /boot/grub/grub.cfg
+        log "INFO" "grub-mkconfig OK."
+    else
+        log "WARN" "No update-grub/grub-mkconfig found; grub.cfg not regenerated."
+    fi
+
+    # Optional audit marker: keep grubenv kernelopts in sync (does not drive boot on Debian by default)
+    if [[ -n "${GRUBENV_CMD:-}" ]]; then
+        run "$GRUBENV_CMD" - set "kernelopts=$WANT_OPTS"
+        log "INFO" "grubenv kernelopts audit marker updated."
+    fi
+
+    log "INFO" "GRUB cmdline hardening inject done. Backup: $BACKUP_DIR"
+}
+
+grub_cmdline_hardening_inject
 # ---------------------------------------------------------------------------
 # END
 # ---------------------------------------------------------------------------

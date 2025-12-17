@@ -1,272 +1,387 @@
-# Ezt a kódot Illessze be a 04_ipv6_worm_protection.sh fájlba!
 #!/usr/bin/env bash
-# 04_ipv6_worm_protection.sh
-# IPv6 "v6worms" protection (sysctl + ip6tables)
-# Implements mitigations inspired by Bellovin/Cheswick/Keromytis (v6 worm strategies).
+# 04_ipv6_worm_protection.sh (v2 redesign)
+# White Venom – RA/MAC Guard (integrated into 04 as requested)
+#
+# Design decision:
+# - No sysctl here (sysctl is owned by 00 + reconciliation).
+# - No full ip6tables-restore here (03 owns baseline firewall).
+# - This module injects a dedicated chain to filter *Router Advertisements only* (ICMPv6 type 134),
+#   so it does not clobber the rest of the firewall.
+#
+# Env (sensitive, DO NOT hardcode):
+#   WV_IFACE              (required) e.g. wlo1
+#   WV_EXPECTED_MAC       (optional) expected MAC of WV_IFACE
+#   WV_RA_ALLOW_MACS      (optional) allow router MAC(s), comma/space-separated
+#   WV_RA_ALLOW_LLADDRS   (optional) allow router IPv6 link-local(s), comma/space-separated
+#   WV_RA_SNIFF_SECONDS   (optional) audit-only tcpdump sniff seconds (if tcpdump exists)
+#
+# Usage:
+#   ./04_ipv6_worm_protection.sh --audit
+#   ./04_ipv6_worm_protection.sh --dry-run
+#   ./04_ipv6_worm_protection.sh --apply
+#   ./04_ipv6_worm_protection.sh --restore
 
 set -euo pipefail
 
-# ⚙️ KONFIGURÁCIÓ
-SYSCTL_CONF="/etc/sysctl.d/99-ipv6-worms.conf"
-SCRIPT_NAME="04_IPV6WORM" # KRITIKUS JAVÍTÁS: Szkriptszám korrekció
-CRITICAL_FILES=("$SYSCTL_CONF") # Fájlok listája, amit a rollbacknek fel kell oldania.
+SCRIPT="04_RA_GUARD"
+TS() { date +"%Y-%m-%d %H:%M:%S"; }
+log() { local lvl="$1"; shift; printf "%s [%s/%s] %s\n" "$(TS)" "$SCRIPT" "$lvl" "$*"; }
+die() { log "FATAL" "$*"; exit 1; }
 
-# Fájlútvonalak
-IP6TABLES_BIN="/sbin/ip6tables"
-IP6TABLES_SAVE="/sbin/ip6tables-save"
-IP6TABLES_RESTORE="/sbin/ip6tables-restore"
-BACKUP_DIR="/var/backups/skell_backups/$SCRIPT_NAME"
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+MODE="audit"   # audit | dry-run | apply | restore
 
-# Paraméterek
-DRY_RUN=true
-IFACE="wlo1" # KRITIKUS JAVÍTÁS: Statikus interfész használata a 03-as szkripttel összhangban
-ALLOW_RA=false # Engedi-e a Router Advertisement-et
-
-# --- LOG ÉS HELPERS ---
-log() {
-    local level="$1"; shift
-    local msg="$*"
-    printf "%s [%s/%s] %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$SCRIPT_NAME" "$level" "$msg"
-}
+have() { command -v "$1" >/dev/null 2>&1; }
+norm_list() { tr ', ' '\n\n' | sed '/^[[:space:]]*$/d'; }
 
 run() {
-    if $DRY_RUN; then
-        log "DRY" "$*"
+  local cmd="$*"
+  if [[ "$MODE" == "dry-run" ]]; then
+    log "DRY" "$cmd"
+  else
+    log "ACTION" "$cmd"
+    eval "$cmd"
+  fi
+}
+
+has_v6_default_route() {
+  ip -6 route show default 2>/dev/null | grep -q .
+}
+
+require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Root required (sudo)."; }
+
+: "${WV_IFACE:=}"
+require_iface() {
+  [[ -n "$WV_IFACE" ]] || die "WV_IFACE required (export WV_IFACE=wlo1)."
+  [[ -d "/sys/class/net/${WV_IFACE}" ]] || die "Interface not found: $WV_IFACE"
+}
+
+iface_mac() { cat "/sys/class/net/${WV_IFACE}/address" 2>/dev/null | tr 'A-Z' 'a-z' || true; }
+
+IP6T="/usr/sbin/ip6tables"; [[ -x "$IP6T" ]] || IP6T="$(command -v ip6tables || true)"
+[[ -n "$IP6T" ]] || die "ip6tables not found."
+
+ip6() { $IP6T "$@"; }
+
+chain_exists() { ip6 -S "$1" >/dev/null 2>&1; }
+
+mac_match_supported() {
+  # nft wrapper usually supports -m mac, but verify
+  ip6 -m mac -h >/dev/null 2>&1
+}
+
+audit() {
+  log "INFO" "Audit snapshot: iface=$WV_IFACE"
+  ip -br link show dev "$WV_IFACE" || true
+  ip -6 -br addr show dev "$WV_IFACE" || true
+  ip -6 route show default || true
+  ip -6 neigh show dev "$WV_IFACE" || true
+
+  local exp="${WV_EXPECTED_MAC:-}"
+  if [[ -n "$exp" ]]; then
+    exp="$(printf "%s" "$exp" | tr 'A-Z' 'a-z')"
+    local act; act="$(iface_mac)"
+    if [[ "$act" == "$exp" ]]; then
+      log "OK" "MAC matches expected ($exp)"
     else
-        log "ACTION" "$*"
-        "$@"
+      log "WARN" "MAC mismatch: actual=$act expected=$exp"
     fi
+  else
+    log "INFO" "WV_EXPECTED_MAC not set; skipping MAC check."
+  fi
+
+  if ip6 -C INPUT -i "$WV_IFACE" -p ipv6-icmp --icmpv6-type router-advertisement -j WV_RA_GUARD 2>/dev/null; then
+    log "OK" "INPUT hook present -> WV_RA_GUARD"
+  else
+    log "INFO" "INPUT hook not present."
+  fi
+
+  if chain_exists WV_RA_GUARD; then
+    log "INFO" "WV_RA_GUARD chain exists:"
+    ip6 -S WV_RA_GUARD || true
+  else
+    log "INFO" "WV_RA_GUARD chain not present."
+  fi
+
+  local sniff="${WV_RA_SNIFF_SECONDS:-0}"
+  if [[ "$sniff" =~ ^[0-9]+$ ]] && [[ "$sniff" -gt 0 ]] && have tcpdump; then
+    log "INFO" "tcpdump RA sniff for ${sniff}s (audit-only)..."
+    timeout "${sniff}" tcpdump -i "$WV_IFACE" -nn -vv "icmp6 and ip6[40]=134" -c 10 || true
+  fi
 }
 
-# --- TRANZAKCIÓS TISZTÍTÁS (BRANCH_CLEANUP) ---
-function branch_cleanup() {
-    log "FATAL" "Hiba történt a $SCRIPT_NAME futása közben! Rollback indítása..."
+apply_guard() {
+  local allow_macs_raw allow_ll_raw
+  allow_macs_raw="${WV_RA_ALLOW_MACS:-}"
+  allow_ll_raw="${WV_RA_ALLOW_LLADDRS:-}"
 
-    # Fájlok feloldása a CRITICAL_FILES listából (Zero-Trust Rollback)
-    for file in "${CRITICAL_FILES[@]}"; do
-        if command -v chattr &> /dev/null && [ -f "$file" ]; then
-            log "INFO" "-> Feloldás: chattr -i $file"
-            chattr -i "$file" 2>/dev/null || true
+  # Normalize lists (split on comma/space)
+  local allow_macs allow_ll
+  allow_macs="$(printf "%s" "$allow_macs_raw" | norm_list || true)"
+  allow_ll="$(printf "%s" "$allow_ll_raw" | norm_list || true)"
+
+  if [[ -z "$allow_macs" && -z "$allow_ll" ]]; then
+    die "Allowlist empty. Set WV_RA_ALLOW_MACS and/or WV_RA_ALLOW_LLADDRS before --apply."
+  fi
+
+  # ---- Validate inputs BEFORE touching ip6tables ----
+  local bad=0
+
+  validate_mac() {
+    local m="$1"
+    [[ "$m" =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]]
+  }
+
+  validate_lladdr() {
+    local a="$1"
+    # Prefer python ipaddress if available for robust validation.
+    if command -v python3 >/dev/null 2>&1; then
+      python3 - <<'PY' "$a"
+import ipaddress,sys
+a=sys.argv[1]
+try:
+  ip=ipaddress.IPv6Address(a)
+except Exception:
+  sys.exit(1)
+# enforce link-local only (fe80::/10)
+if not ip.is_link_local:
+  sys.exit(2)
+sys.exit(0)
+PY
+      return $?
+    fi
+    # Fallback: cheap checks
+    [[ "$a" == fe80:* || "$a" == FE80:* ]]
+  }
+
+  if [[ -n "$allow_macs" ]]; then
+    while IFS= read -r mac; do
+      mac="$(printf "%s" "$mac" | tr 'A-Z' 'a-z')"
+      [[ -z "$mac" ]] && continue
+      if ! validate_mac "$mac"; then
+        log "FATAL" "Invalid MAC in WV_RA_ALLOW_MACS: '$mac' (expected aa:bb:cc:dd:ee:ff)"
+        bad=1
+      fi
+    done <<<"$allow_macs"
+  fi
+
+  if [[ -n "$allow_ll" ]]; then
+    while IFS= read -r ll; do
+      [[ -z "$ll" ]] && continue
+      validate_lladdr "$ll"
+      rc=$?
+      if [[ $rc -ne 0 ]]; then
+        if [[ $rc -eq 2 ]]; then
+          log "FATAL" "WV_RA_ALLOW_LLADDRS must be link-local (fe80::/10). Got: '$ll'"
+        else
+          log "FATAL" "Invalid IPv6 address in WV_RA_ALLOW_LLADDRS: '$ll'"
         fi
-    done
+        bad=1
+      fi
+    done <<<"$allow_ll"
+  fi
 
-    # Sysctl backup visszaállítása
-    if [ -f "$BACKUP_DIR/99-ipv6-worms.conf.bak" ]; then
-        log "INFO" "-> Sysctl fájl visszaállítása a backupból."
-        mv "$BACKUP_DIR/99-ipv6-worms.conf.bak" "$SYSCTL_CONF" || true
+  [[ $bad -eq 0 ]] || die "Refusing to apply RA guard due to invalid allowlist."
+
+  log "INFO" "Applying WV_RA_GUARD for iface=$WV_IFACE (RA only)."
+
+  # ip6tables wait flag if supported
+  local WFLAG=""
+  if $IP6T -h 2>/dev/null | grep -q -- '-w'; then
+    WFLAG="-w"
+  fi
+
+  # Create/flush chain
+  if chain_exists WV_RA_GUARD; then
+    run "$IP6T $WFLAG -F WV_RA_GUARD"
+  else
+    run "$IP6T $WFLAG -N WV_RA_GUARD"
+  fi
+
+  # Allow by MAC (if supported)
+  if [[ -n "$allow_macs" ]]; then
+    if mac_match_supported; then
+      while IFS= read -r mac; do
+        mac="$(printf "%s" "$mac" | tr 'A-Z' 'a-z')"
+        [[ -z "$mac" ]] && continue
+        run "$IP6T $WFLAG -A WV_RA_GUARD -i '$WV_IFACE' -p ipv6-icmp --icmpv6-type router-advertisement -m mac --mac-source '$mac' -j ACCEPT"
+      done <<<"$allow_macs"
+    else
+      log "WARN" "ip6tables -m mac not supported here; ignoring WV_RA_ALLOW_MACS."
     fi
+  fi
 
-    # ip6tables backup visszaállítása (ha létezik)
-    if [ -f "$BACKUP_DIR/ip6tables.before.$TIMESTAMP" ]; then
-        log "INFO" "-> ip6tables szabályok visszaállítása a backupból."
-        $IP6TABLES_RESTORE < "$BACKUP_DIR/ip6tables.before.$TIMESTAMP" 2>/dev/null || true
-    fi
+  # Allow by link-local source
+  if [[ -n "$allow_ll" ]]; then
+    while IFS= read -r ll; do
+      [[ -z "$ll" ]] && continue
+      run "$IP6T $WFLAG -A WV_RA_GUARD -i '$WV_IFACE' -p ipv6-icmp --icmpv6-type router-advertisement -s '$ll' -j ACCEPT"
+    done <<<"$allow_ll"
+  fi
 
-    log "FATAL" "$SCRIPT_NAME rollback befejezve. Kézi ellenőrzés szükséges!"
-    exit 1
+  # Log + drop everything else
+  run "$IP6T $WFLAG -A WV_RA_GUARD -i '$WV_IFACE' -p ipv6-icmp --icmpv6-type router-advertisement -j LOG --log-prefix 'WV_RA_DROP ' --log-level 4"
+  run "$IP6T $WFLAG -A WV_RA_GUARD -i '$WV_IFACE' -p ipv6-icmp --icmpv6-type router-advertisement -j DROP"
+
+  # Hook into INPUT early
+  if ip6 -C INPUT -i "$WV_IFACE" -p ipv6-icmp --icmpv6-type router-advertisement -j WV_RA_GUARD 2>/dev/null; then
+    log "INFO" "INPUT already jumps to WV_RA_GUARD for RA on $WV_IFACE."
+  else
+    run "$IP6T $WFLAG -I INPUT 1 -i '$WV_IFACE' -p ipv6-icmp --icmpv6-type router-advertisement -j WV_RA_GUARD"
+  fi
+
+  log "OK" "RA guard applied."
 }
-trap branch_cleanup ERR
-# ---------------------------------------------------------------------------
 
-# --- ARGUMENTUMOK FELDOLGOZÁSA ---
+restore_guard() {
+  log "INFO" "Restoring WV_RA_GUARD (remove hook + chain)."
+
+  # Remove any INPUT jumps to WV_RA_GUARD for RA, regardless of interface
+  local WFLAG=""
+  if $IP6T -h 2>/dev/null | grep -q -- '-w'; then
+    WFLAG="-w"
+  fi
+
+  # Find matching rules and delete them deterministically
+  while true; do
+    local line
+    line="$($IP6T -S INPUT 2>/dev/null | grep -E -- " -p ipv6-icmp .*--icmpv6-type router-advertisement .* -j WV_RA_GUARD" | head -n 1 || true)"
+    [[ -z "$line" ]] && break
+    # Convert "-A INPUT ..." -> "-D INPUT ..."
+    local del
+    del="$(printf "%s" "$line" | sed -E 's/^-A /-D /')"
+    run "$IP6T $WFLAG $del"
+  done
+
+  if chain_exists WV_RA_GUARD; then
+    run "$IP6T $WFLAG -F WV_RA_GUARD"
+    run "$IP6T $WFLAG -X WV_RA_GUARD"
+  fi
+
+  log "OK" "RA guard restored."
+}
+
 usage() {
-  cat <<EOF
-Usage: $0 [--iface IFACE] [--apply|--dry-run] [--allow-ra]
-  --iface IFACE : target interface for per-interface sysctl rules (default: wlo1)
-  --dry-run   : show planned changes (default)
-  --apply     : make changes (writes sysctl + runs ip6tables-restore)
-  --allow-ra  : allow accepting Router Advertisements on the IF (default: blocked for security)
+  cat <<EOF
+Usage: $0 --audit | --dry-run | --apply | --restore
+
+Env:
+  WV_IFACE (required)
+  WV_EXPECTED_MAC (optional)
+  WV_RA_ALLOW_MACS (optional)
+  WV_RA_ALLOW_LLADDRS (optional)
 EOF
-  exit 1
-}
-# ---------------------------------------------------------------------------
-# 0. ELŐKÉSZÍTÉS ÉS BEMENET ELLENŐRZÉSE
-# ---------------------------------------------------------------------------
-
-MODE="${1:---dry-run}" # Kezdő érték beállítása
-DRY_RUN=true # Alapértelmezett beállítás
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --iface) IFACE="$2"; shift 2;;
-    --apply) DRY_RUN=false; shift;;
-    --dry-run) DRY_RUN=true; shift;;
-    --allow-ra) ALLOW_RA=true; shift;;
-    -h|--help) usage;;
-    *) log "[ERROR] Unknown arg: $1"; usage;;
-  esac
-done
-
-# root check
-[ "$(id -u)" -eq 0 ] || { echo "Run as root"; exit 2; }
-
-if $DRY_RUN; then
-    log "INFO" "Mode: DRY-RUN (szimuláció)"
-fi
-
-# KRITIKUS JAVÍTÁS: Autodetect eltávolítva, IFACE=$IFACE (wlo1) használatban.
-if [ -z "$IFACE" ]; then
-    log "[ERROR] Interface not set. Use --iface IFACE or check default value." >&2
-    exit 3
-fi
-
-log "START: IPv6 Worm Protection Flow. Interface: $IFACE. Mode: $(if $DRY_RUN; then echo "DRY-RUN"; else echo "APPLY"; fi)"
-
-
-# ---------- Build sysctl content ----------
-# KRITIKUS JAVÍTÁS: Stabilabb string hozzárendelés a set -e hibák elkerülésére
-SYSCONF_CORE=$(cat <<'EOF'
-# IPv6 worm protection sysctl (generated by 04_ipv6_worm_protection.sh)
-# Global kernel hardening
-net.ipv6.conf.all.accept_redirects = 0
-net.ipv6.conf.default.accept_redirects = 0
-net.ipv6.conf.all.accept_source_route = 0
-net.ipv6.conf.default.accept_source_route = 0
-net.ipv6.conf.all.forwarding = 0
-net.ipv6.conf.default.forwarding = 0
-# limit ICMPv6 (kernel-level ratelimiting where available)
-net.ipv6.icmp.ratelimit = 100
-# protect ND tables a bit (not perfect but helpful)
-net.ipv6.neigh.default.gc_thresh1 = 128
-net.ipv6.neigh.default.gc_thresh2 = 512
-net.ipv6.neigh.default.gc_thresh3 = 1024
-# filesystem / kernel protections (useful generally)
-fs.protected_hardlinks = 1
-fs.protected_symlinks = 1
-kernel.dmesg_restrict = 1
-kernel.kptr_restrict = 1
-EOF
-)
-
-SYSCONF="$SYSCONF_CORE"$'\n'
-# Add per-interface choices for RA/autoconf depending on --allow-ra
-if $ALLOW_RA; then
-  SYSCONF="$SYSCONF"$'\n'"# Allow RA on $IFACE (explicit because --allow-ra passed)"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.accept_ra = 1"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.autoconf = 1"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.accept_ra_defrtr = 1"
-else
-  SYSCONF="$SYSCONF"$'\n'"# Block Router Advertisements and autoconf on $IFACE by default (safer mitigation)"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.accept_ra = 0"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.autoconf = 0"
-  SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.accept_ra_defrtr = 0"
-fi
-
-# Additional per-interface privacy/enforcement
-SYSCONF="$SYSCONF"$'\n'"# Prefer temporary (privacy) addresses on IF"
-SYSCONF="$SYSCONF"$'\n'"net.ipv6.conf.$IFACE.use_tempaddr = 2"
-
-
-# ---------- Build ip6tables rule set (Restore syntax) ----------
-build_ip6_rules() {
-  cat <<'RULES'
-# Generated by 04_ipv6_worm_protection.sh
-*filter
-:INPUT DROP [0:0]
-:FORWARD DROP [0:0]
-:OUTPUT ACCEPT [0:0]
-
-# Loopback
--A INPUT -i lo -j ACCEPT
-
-# Established connections
--A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-# Allow Neighbor Discovery ICMPv6 types (rate-limited)
--A INPUT -p ipv6-icmp --icmpv6-type 133 -m limit --limit 30/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 134 -m limit --limit 30/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 135 -m limit --limit 100/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 136 -m limit --limit 100/min -j ACCEPT
-
-# Allow essential ICMPv6 error messages
--A INPUT -p ipv6-icmp --icmpv6-type destination-unreachable -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type packet-too-big -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type time-exceeded -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type parameter-problem -j ACCEPT
-
-# Block non-ND multicast traffic arriving to the interface (drop other ff00::/8)
--A INPUT -d ff00::/8 -i __IFACE__ -p ! ipv6-icmp -j DROP
-
-# KRITIKUS JAVÍTÁS: Quad9 DNS szabályok eltávolítva (Redundancia / VPN)
-
-# Log a small amount and drop the rest
--A INPUT -m limit --limit 5/min -j LOG --log-prefix "V6WORMDROP: "
--A INPUT -j DROP
-COMMIT
-RULES
+  exit 1
 }
 
-IP6_RAW=$(build_ip6_rules)
-IP6_RENDERED=$(printf "%s" "$IP6_RAW" | sed "s|__IFACE__|$IFACE|g")
+# --- arg parsing ---
+# Notes about sudo/env:
+# - sudo often drops environment variables. Prefer:
+#     sudo env WV_IFACE=wlo1 WV_RA_ALLOW_LLADDRS="fe80::...." ./04... --apply
+#
+# Modes:
+#   --audit    : status only
+#   --dry-run  : show what would happen (decision + planned ip6tables ops)
+#   --apply    : AUTO behavior:
+#                 - If no IPv6 default route: ensure guard OFF (restore) and exit 0
+#                 - If IPv6 default route present:
+#                     - If allowlist present and WV_IFACE set -> apply guard
+#                     - Else -> warn and leave guard OFF (or fail if WV_RA_STRICT=1)
+#   --restore  : force remove guard (best effort)
 
+WV_RA_STRICT="${WV_RA_STRICT:-0}"  # 1 => fail if V6 default route is present but prerequisites are missing
 
-# ----------------------------------------------------
-# DRY-RUN FÁZIS
-# ----------------------------------------------------
-if $DRY_RUN; then
-    log "START: $SCRIPT_NAME flow (DRY-RUN MODE)"
+case "${1:-}" in
+  --audit|"") MODE="audit" ;;
+  --dry-run) MODE="dry-run" ;;
+  --apply) MODE="apply" ;;
+  --restore) MODE="restore" ;;
+  -h|--help) usage ;;
+  *) die "Unknown arg: $1" ;;
+esac
 
-    log "INFO" "Sysctl konfiguráció kiírása a $SYSCTL_CONF fájlba (IPv6 worm mitigation + kernel hardening)."
-    log "===== SYSCTL (will be written to: $SYSCTL_CONF) ====="
-    echo "$SYSCONF" | sed 's/^/  /'
-    run "sysctl --system"
+require_root
 
-    log "INFO" "ip6tables szabályok mentése $BACKUP_DIR alá."
-    run "$IP6TABLES_SAVE > $BACKUP_DIR/ip6tables.before.$TIMESTAMP"
-    log "INFO" "ip6tables-restore futtatása a következő szabályok betöltésére:"
-    log "===== ip6tables preview (ip6tables-restore input) ====="
-    echo "$IP6_RENDERED" | sed 's/^/  /'
-    log "APPLY COMPLETE: $SCRIPT_NAME sikeresen alkalmazva (DRY-RUN)."
-    exit 0
-fi
+log "INFO" "Mode: --$MODE"
 
-# ----------------------------------------------------
-# APPLY FÁZIS
-# ----------------------------------------------------
+case "$MODE" in
+  audit)
+    # If iface isn't set, audit still prints nothing destructive.
+    if [[ -z "${WV_IFACE:-}" ]]; then
+      log "WARN" "WV_IFACE not set; audit will be limited. (Hint: sudo env WV_IFACE=wlo1 $0 --audit)"
+    else
+      require_iface
+    fi
+    audit
+    ;;
 
-log "ACTION" "Kritikus fájlok előkészítése és backupja."
-run mkdir -p "$BACKUP_DIR"
-run cp -a "$SYSCTL_CONF" "$BACKUP_DIR/99-ipv6-worms.conf.bak" 2>/dev/null || true
-run "$IP6TABLES_SAVE > $BACKUP_DIR/ip6tables.before.$TIMESTAMP"
+  restore)
+    # restore does not require iface (we delete any WV_RA_GUARD hook lines).
+    restore_guard
+    ;;
 
-# 1. Apply Sysctl
-log "ACTION" "Writing sysctl config to $SYSCTL_CONF"
-run echo "$SYSCONF" > "$SYSCTL_CONF"
-run chmod 0644 "$SYSCTL_CONF"
+  dry-run)
+    # Decision preview
+    if has_v6_default_route; then
+      log "INFO" "IPv6 default route detected -> V6_NATIVE behavior."
+    else
+      log "INFO" "No IPv6 default route -> LEGACY_UPLINK behavior (guard OFF)."
+    fi
 
-log "ACTION" "Applying sysctl --system"
-run sysctl --system # KRITIKUS JAVÍTÁS: Hibaelnyelés eltávolítva: set -e kezeli a hibát
+    if ! has_v6_default_route; then
+      restore_guard
+      log "INFO" "Dry-run complete (legacy: would keep RA guard OFF)."
+      exit 0
+    fi
 
-# 2. Apply ip6tables rules via restore
-log "ACTION" "Applying ip6tables rules via ip6tables-restore (rendered for $IFACE)"
+    # V6_NATIVE: need iface + allowlist
+    if [[ -z "${WV_IFACE:-}" ]]; then
+      if [[ "$WV_RA_STRICT" == "1" ]]; then
+        die "V6 default route present but WV_IFACE missing (strict)."
+      fi
+      log "WARN" "V6 default route present but WV_IFACE missing -> would SKIP apply (guard OFF)."
+      exit 0
+    fi
+    require_iface
 
-TMP_RULES_FILE="/tmp/v6worm_ip6_apply_$TIMESTAMP.conf"
-run echo "$IP6_RENDERED" > "$TMP_RULES_FILE"
+    if [[ -z "${WV_RA_ALLOW_MACS:-}" && -z "${WV_RA_ALLOW_LLADDRS:-}" ]]; then
+      if [[ "$WV_RA_STRICT" == "1" ]]; then
+        die "V6 default route present but allowlist missing (strict)."
+      fi
+      log "WARN" "V6 default route present but allowlist missing -> would SKIP apply (guard OFF)."
+      exit 0
+    fi
 
-if command -v $IP6TABLES_RESTORE >/dev/null 2>&1; then
-    # KRITIKUS JAVÍTÁS: Hibaelnyelés eltávolítva: set -e kezeli a hibát
-    run $IP6TABLES_RESTORE < "$TMP_RULES_FILE"
-    log "OK" "ip6tables szabályok betöltve."
-else
-    log "FATAL" "ip6tables-restore not found. Rules were written to $TMP_RULES_FILE, de NEM alkalmazva!"
-    exit 1
-fi
+    audit
+    apply_guard
+    log "INFO" "Dry-run complete (v6-native: would apply guard)."
+    ;;
 
-run rm -f "$TMP_RULES_FILE"
+  apply)
+    # AUTO behavior for orchestrator: safe-by-default, no branching outside.
+    if ! has_v6_default_route; then
+      log "INFO" "No IPv6 default route -> ensuring RA guard OFF."
+      restore_guard
+      exit 0
+    fi
 
-# 3. Zárás és Lezárás (Commit)
-log "COMMIT" "Kritikus fájlok lezárása (chattr +i)."
-run chattr +i "$SYSCTL_CONF" # KRITIKUS JAVÍTÁS: Immutability lock
+    # V6 default route exists. Either apply guard (if configured) or warn/strict-fail.
+    if [[ -z "${WV_IFACE:-}" ]]; then
+      if [[ "$WV_RA_STRICT" == "1" ]]; then
+        die "V6 default route present but WV_IFACE missing (strict)."
+      fi
+      log "WARN" "V6 default route present but WV_IFACE missing -> leaving RA guard OFF."
+      exit 0
+    fi
+    require_iface
 
-# 4. Persist rules
-if command -v netfilter-persistent >/dev/null 2>&1; then
-  log "ACTION" "Persisting rules with netfilter-persistent."
-  run netfilter-persistent save || true
-fi
+    if [[ -z "${WV_RA_ALLOW_MACS:-}" && -z "${WV_RA_ALLOW_LLADDRS:-}" ]]; then
+      if [[ "$WV_RA_STRICT" == "1" ]]; then
+        die "V6 default route present but allowlist missing (strict)."
+      fi
+      log "WARN" "V6 default route present but allowlist missing -> leaving RA guard OFF."
+      exit 0
+    fi
 
-# 5. Rollback fájl törlése
-run rm -f "$BACKUP_DIR/99-ipv6-worms.conf.bak"
-
-log "APPLY COMPLETE: IPv6 worm protections applied. Backups in: $BACKUP_DIR"
-exit 0
+    apply_guard
+    ;;
+esac

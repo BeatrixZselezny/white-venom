@@ -1,0 +1,24 @@
+# --- White Venom: local backups / parking (do not commit) ---
+debian_skeleton/backup/
+debian_skeleton/parking/
+debian_skeleton/*.bak
+debian_skeleton/*.bak_*
+debian_skeleton/*~
+
+# --- Editor / IDE noise ---
+.vscode/
+.idea/
+.DS_Store
+
+# --- Logs / temp ---
+*.log
+*.tmp
+
+# --- Build / packaging artifacts (if you add later) ---
+build/
+dist/
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+*.sha256

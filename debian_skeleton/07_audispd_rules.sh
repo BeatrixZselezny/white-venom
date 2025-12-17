@@ -1,4 +1,10 @@
 #!/bin/bash
+# WV_DRYRUN_GATE_07
+if [[ "${1:-}" == "--dry-run" ]]; then
+  echo "$(date +"%Y-%m-%d %H:%M:%S") [07_AUDISPD_RULES/DRY] skipping apply/load in dry-run";
+  exit 0;
+fi
+
 # branches/08_audispd_rules.sh
 # Auditd (Linux Audit Daemon) szabályainak beállítása.
 # Zero Trust detektálás: kritikus fájl- és rendszerhívás figyelés.
@@ -17,28 +23,28 @@ log "" # Új szakasz
 
 # Ellenőrzés: root user
 if [ "$(id -u)" -ne 0 ]; then
-    log "[ERROR] Run as root!" >&2
-    exit 1
+    log "[ERROR] Run as root!" >&2
+    exit 1
 fi
 
 # --- TRANZAKCIÓS TISZTÍTÁS (CLEANUP/ROLLBACK) ---
 function branch_cleanup() {
-    log "[CRITICAL ALERT] Hiba történt a 08-as ág futása közben! Rollback a szabályokra..."
-    
+    log "[CRITICAL ALERT] Hiba történt a 07-es ág futása közben! Rollback a szabályokra..."
+    
     # **JAVÍTÁS: A szabályfájl zárolásának feloldása**
     if command -v chattr &> /dev/null; then chattr -i "$RULES_FILE" 2>/dev/null || true; fi
 
-    # 1. Auditd szabályok visszaállítása (ha van backup)
-    if [ -f "$RULES_FILE_BACKUP" ]; then
-        log "[ACTION] Auditd szabályok visszaállítása a backupból."
-        mv "$RULES_FILE_BACKUP" "$RULES_FILE" || true
-        /sbin/augenrules --load || true # Szabályok újratöltése
-    else
-        log "[WARNING] Nincs backup a $RULES_FILE-ról, a szabályt törlöm."
-        rm -f "$RULES_FILE" || true
-    fi
-    
-    log "[CRITICAL ALERT] 08-as ág rollback befejezve. Kézi ellenőrzés szükséges!"
+    # 1. Auditd szabályok visszaállítása (ha van backup)
+    if [ -f "$RULES_FILE_BACKUP" ]; then
+        log "[ACTION] Auditd szabályok visszaállítása a backupból."
+        mv "$RULES_FILE_BACKUP" "$RULES_FILE" || true
+        /sbin/augenrules --load || true # Szabályok újratöltése
+    else
+        log "[WARNING] Nincs backup a $RULES_FILE-ról, a szabályt törlöm."
+        rm -f "$RULES_FILE" || true
+    fi
+    
+    log "[CRITICAL ALERT] 07-es ág rollback befejezve. Kézi ellenőrzés szükséges!"
     exit 1
 }
 
@@ -60,8 +66,8 @@ fi
 
 # Hardening: /etc/securetty eltávolítása, hogy megelőzze a tty alapú root logint
 if [ -f "$SECURETTY_FILE" ]; then
-    log "[HARDENING] $SECURETTY_FILE eltávolítása (Explicit Zero Trust Minimalizálás)."
-    rm -f "$SECURETTY_FILE"
+    log "[HARDENING] $SECURETTY_FILE eltávolítása (Explicit Zero Trust Minimalizálás)."
+    rm -f "$SECURETTY_FILE"
 fi
 
 log "2. $RULES_FILE létrehozása a Zero Trust szabályokkal."
@@ -130,11 +136,11 @@ chmod 0640 "$RULES_FILE"
 # --- 3. AUDITD SZABÁLYOK BETÖLTÉSE ÉS LEZÁRÁSA (COMMIT) ---
 log "3. Auditd szabályok betöltése és fájl lezárása."
 if command -v augenrules >/dev/null 2>&1; then
-    /sbin/augenrules --load
+    /sbin/augenrules --load
 else
-    log "[ACTION] augenrules nem található. Auditd szolgáltatás újraindítása (SysV init)."
-    # **KRITIKUS JAVÍTÁS: Eltávolítva a || true a szolgáltatás újraindításáról!**
-    service auditd restart || /etc/init.d/auditd restart
+    log "[ACTION] augenrules nem található. Auditd szolgáltatás újraindítása (SysV init)."
+    # **KRITIKUS JAVÍTÁS: Eltávolítva a || true a szolgáltatás újraindításáról!**
+    service auditd restart || /etc/init.d/auditd restart
 fi
 
 # **JAVÍTÁS: Fájl lezárása (chattr +i)**
@@ -146,5 +152,5 @@ fi
 # Töröljük a sikeres futás után a backupot
 rm -f "$RULES_FILE_BACKUP"
 
-log "[DONE] 08-as ág befejezve. Kritikus Auditd szabályok beállítva és lezárva."
+log "[DONE] 07-es ág befejezve. Kritikus Auditd szabályok beállítva és lezárva."
 exit 0

@@ -1,193 +1,131 @@
 #!/usr/bin/env bash
-# 03_sysctl_ip6tables-security.sh
-# Sysctl + IPv6 ip6tables security configuration (IPv4-környezetre optimalizálva)
+# 03_sysctl_ip6tables-security.sh (v2 redesign)
+# White Venom – IPv6 firewall baseline (ip6tables) only.
+#
+# Design decision:
+# - sysctl is owned by 00_install + final-authority reconciliation.
+# - This module owns the baseline IPv6 firewall ruleset application + backups.
+# - RA/MAC allowlisting is handled by 04 (WV_RA_GUARD) as an incremental chain injection.
 
 set -euo pipefail
 
-# KONFIGURÁCIÓ
-SYSCTL_CONF="/etc/sysctl.d/99-security-ipv6.conf"
-SCRIPT_NAME="03_SYSCTL"
-TIMESTAMP="$(date +%Y%m%d-%H%M%S)" # Kritikus: Kötetlen változó hiba javítva
+SCRIPT="03_IP6TABLES_BASELINE"
+TS() { date +"%Y-%m-%d %H:%M:%S"; }
+log() { local lvl="$1"; shift; printf "%s [%s/%s] %s\n" "$(TS)" "$SCRIPT" "$lvl" "$*"; }
+die() { log "FATAL" "$*"; exit 1; }
 
-# ROLLBACK TÁRGYAK
-SYSCTL_CONF_BACKUP="${SYSCTL_CONF}.bak.${SCRIPT_NAME}"
-IP6TABLES_BIN="/sbin/ip6tables"
-IP6TABLES_SAVE="/usr/sbin/ip6tables-save"
-IP6TABLES_RESTORE="/usr/sbin/ip6tables-restore"
-# Statikusan definiáljuk a detektálás helyett (Zero-Trust!)
-IFACE="wlo1"
+MODE="--dry-run"     # --dry-run | --apply
+DRY=true
 
-# --- LOG ÉS FUSS FUNKCIÓK ---
+# Absolute-safe script dir
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-log() {
-    local level="$1"; shift
-    local msg="$*"
-    printf "%s [%s/%s] %s\n" "$(date +"%Y-%m-%d %H:%M:%S")" "$SCRIPT_NAME" "$level" "$msg"
-}
+# Source rules file (repo) and destination rules file (system)
+RULES_SRC_DEFAULT="${SCRIPT_DIR}/firewall/whitevenom_baseline.v6"
+RULES_SRC="${WV_IP6TABLES_RULES_SRC:-$RULES_SRC_DEFAULT}"
+RULES_DST="/etc/ip6tables/rules.v6"
+
+BACKUP_ROOT="/var/backups/skell_backups/03_ip6tables"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BKP_RULES="${BACKUP_ROOT}/rules.v6.bak.${STAMP}"
+BKP_SAVE="${BACKUP_ROOT}/ip6tables.before.${STAMP}"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# prefer absolute tools
+IP6T="/usr/sbin/ip6tables"; [[ -x "$IP6T" ]] || IP6T="$(command -v ip6tables || true)"
+IP6TS="/usr/sbin/ip6tables-save"; [[ -x "$IP6TS" ]] || IP6TS="$(command -v ip6tables-save || true)"
+IP6TR="/usr/sbin/ip6tables-restore"; [[ -x "$IP6TR" ]] || IP6TR="$(command -v ip6tables-restore || true)"
 
 run() {
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-        log "DRY" "$*"
-    else
-        log "ACTION" "$*"
-        "$@"
-    fi
+  if $DRY; then
+    log "DRY" "$*"
+  else
+    log "ACTION" "$*"
+    "$@"
+  fi
 }
 
-# --- TRANZAKCIÓS TISZTÍTÁS (BRANCH_CLEANUP) ---
-function branch_cleanup() {
-    log "FATAL" "Hiba történt a 03-as ág futása közben! Rollback indítása..."
-
-    # 1. Sysctl fájl feloldása, visszaállítása és törlése (ha ez a script hozta létre)
-    if command -v chattr &> /dev/null; then
-        chattr -i "$SYSCTL_CONF" 2>/dev/null || true
-    fi
-
-    if [ -f "$SYSCTL_CONF_BACKUP" ]; then
-        log "INFO" "-> $SYSCTL_CONF visszaállítása a backupból."
-        mv "$SYSCTL_CONF_BACKUP" "$SYSCTL_CONF" || true
-    else
-        log "INFO" "-> $SYSCTL_CONF eltávolítása (nem volt backup)."
-        rm -f "$SYSCTL_CONF" || true
-    fi
-
-    log "FATAL" "03-as ág rollback befejezve. Kézi ellenőrzés szükséges!"
-    exit 1
+run_sh() {
+  local cmd="$1"
+  if $DRY; then
+    log "DRY" "$cmd"
+  else
+    log "ACTION" "$cmd"
+    bash -c "$cmd"
+  fi
 }
-trap branch_cleanup ERR
 
-# ---------------------------------------------------------------------------
-# 0. ELŐKÉSZÍTÉS ÉS BEMENET ELLENŐRZÉSE
-# ---------------------------------------------------------------------------
+usage() {
+  cat <<EOF
+Usage: $0 [--dry-run|--apply]
 
-MODE="${1:---apply}"
-DRY_RUN=0
-if [[ "$MODE" == "--dry-run" ]]; then
-    DRY_RUN=1
-    log "INFO" "Mode: --dry-run (szimuláció)"
-fi
+Env:
+  WV_IP6TABLES_RULES_SRC   Optional absolute path to baseline rules file (ip6tables-restore format).
+Default:
+  $RULES_SRC_DEFAULT
 
-log "--- Sysctl & ip6tables hardening ($IFACE) ---"
-
-# 1. SYSCTL KONFIGURÁCIÓ LÉTREHOZÁSA
-log "1. Sysctl fájl tartalmának összeállítása ($SYSCTL_CONF)."
-
-# KRITIKUS JAVÍTÁS: Stabilabb cat <<'EOF' használata a dry-run szintaktikai hiba elkerülése érdekében.
-SYSCONF=$(cat <<'EOF'
-# Kernel and filesystem protections
-kernel.dmesg_restrict = 1
-kernel.kptr_restrict = 1
-kernel.panic = 30
-kernel.panic_on_oops = 1
-fs.protected_hardlinks = 1
-fs.protected_symlinks = 1
-fs.protected_regular = 2
-fs.protected_fifos = 2
-fs.suid_dumpable = 0
-kernel.unprivileged_bpf_disabled = 1 # KRITIKUS: BPF hardening
-
-# Memory performance
-vm.mmap_min_addr = 65536
-vm.swappiness = 10
-
-# IPv6 security
-net.ipv6.conf.all.accept_redirects = 0
-net.ipv6.conf.default.accept_redirects = 0
-net.ipv6.conf.all.accept_source_route = 0
-net.ipv6.conf.default.accept_source_route = 0
-net.ipv6.conf.all.forwarding = 0
-net.ipv6.conf.default.forwarding = 0
-
-# Privacy (RFC 4941)
-net.ipv6.conf.all.use_tempaddr = 2
-net.ipv6.conf.default.use_tempaddr = 2
-net.ipv6.conf.all.use_tempaddr = 2 # JAVÍTOTT: A hiányzó/hibás sort lecseréljük ALL-ra
-
-# ICMPv6
-net.ipv6.icmp.ratelimit = 100
 EOF
-)
-
-# 2. IP6TABLES SZABÁLYOK LÉTREHOZÁSA
-log "2. ip6tables szabályok összeállítása (IPv6 DNS szabályok eltávolítva)."
-
-# KRITIKUS: Eltávolítottuk az IPv6 Quad9 DNS szabályokat.
-build_ip6_rules() {
-    cat <<EOF
-*filter
-:INPUT DROP [0:0]
-:FORWARD DROP [0:0]
-:OUTPUT ACCEPT [0:0]
--A INPUT -i lo -j ACCEPT
--A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-# Accept necessary ICMPv6 types for neighbor discovery, etc., rate-limited
--A INPUT -p ipv6-icmp --icmpv6-type 133 -m limit --limit 50/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 134 -m limit --limit 50/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 135 -m limit --limit 50/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type 136 -m limit --limit 50/min -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type destination-unreachable -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type packet-too-big -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type time-exceeded -j ACCEPT
--A INPUT -p ipv6-icmp --icmpv6-type parameter-problem -j ACCEPT
-# KRITIKUS JAVÍTÁS: IPv6 DNS szabályok KI lettek véve
-
--A INPUT -m limit --limit 3/min -j LOG --log-prefix "IP6DROP: "
--A INPUT -j DROP
-COMMIT
-EOF
+  exit 1
 }
 
-IP6_RULES=$(build_ip6_rules)
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) MODE="--dry-run"; DRY=true; shift ;;
+    --apply)   MODE="--apply";   DRY=false; shift ;;
+    -h|--help) usage ;;
+    *) die "Unknown arg: $1" ;;
+  esac
+done
 
-# ---------------------------------------------------------------------------
-# 3. VÉGREHAJTÁS ÉS ZÁRÁS (COMMIT)
-# ---------------------------------------------------------------------------
+[[ $EUID -eq 0 ]] || die "Root required (sudo)."
+[[ -n "$IP6T" && -n "$IP6TS" && -n "$IP6TR" ]] || die "ip6tables toolchain missing."
 
-if $DRY_RUN; then
-    # KRITIKUS JAVÍTÁS: A dry-run logolás után azonnal kilépünk a hiba elkerülése érdekében.
-    log "INFO" "Sysctl contents:"
-    echo "$SYSCONF" | while read -r line; do log "DRY (Sysctl): $line"; done
-    log "INFO" "ip6tables rules to be applied:"
-    echo "$IP6_RULES" | while read -r line; do log "DRY (ip6tables): $line"; done
+log "INFO" "Mode: $MODE"
+log "INFO" "Rules src: $RULES_SRC"
+log "INFO" "Rules dst: $RULES_DST"
 
-    log "APPLY COMPLETE: IPv6/Sysctl hardening sikeresen alkalmazva (dry-run)."
-    exit 0
+[[ -f "$RULES_SRC" ]] || die "Rules source file not found: $RULES_SRC"
+
+if $DRY; then
+  log "INFO" "Preview rules (first 80 lines):"
+  nl -ba "$RULES_SRC" | sed -n '1,80p' | sed 's/^/  /'
+  log "INFO" "Dry-run complete."
+  exit 0
 fi
 
-# Előkészítés és Backup
-log "ACTION" "Kritikus fájlok backupja."
-run cp "$SYSCTL_CONF" "$SYSCTL_CONF_BACKUP" 2>/dev/null || true # Eredeti backup
-# Hozzáadjuk a chattr -i parancsot a lezáráshoz
-LOCK_STATUS_SYSCTL=$(lsattr "$SYSCTL_CONF" 2>/dev/null | awk '{print $1}' | grep -o "i" || true)
-if [ "$LOCK_STATUS_SYSCTL" == "i" ]; then
-    run chattr -i "$SYSCTL_CONF"
+# Apply
+run mkdir -p "$BACKUP_ROOT"
+run chmod 700 "$BACKUP_ROOT"
+
+# Backup current rules file if present
+if [[ -f "$RULES_DST" ]]; then
+  run cp -a "$RULES_DST" "$BKP_RULES"
+  log "INFO" "Backup rules.v6 -> $BKP_RULES"
 fi
 
-run $IP6TABLES_SAVE > "/var/backups/skell_backups/ip6tables.before.$TIMESTAMP"
+# Backup current ip6tables state
+run_sh "\"$IP6TS\" > \"$BKP_SAVE\""
+log "INFO" "Backup ip6tables-save -> $BKP_SAVE"
 
-# Írás és Alkalmazás
-log "ACTION" "Sysctl konfiguráció írása és alkalmazása."
-echo "$SYSCONF" > "$SYSCTL_CONF"
-run sysctl --system
+# Install rules file (system)
+run mkdir -p "$(dirname "$RULES_DST")"
+run cp -a "$RULES_SRC" "$RULES_DST"
 
-log "ACTION" "ip6tables szabályok írása és betöltése."
-RULES_FILE="/etc/ip6tables/rules.v6"
-run mkdir -p "$(dirname "$RULES_FILE")"
-echo "$IP6_RULES" > "$RULES_FILE"
-
-if command -v $IP6TABLES_RESTORE >/dev/null 2>&1; then
-    run $IP6TABLES_RESTORE < "$RULES_FILE"
+# Apply via ip6tables-restore (best-effort wait for lock if supported)
+if "$IP6TR" -h 2>/dev/null | grep -q -- '-w'; then
+  run_sh "\"$IP6TR\" -w < \"$RULES_DST\""
 else
-    log "WARN" "ip6tables-restore nem található, manuális betöltés szükséges!"
+  run_sh "\"$IP6TR\" < \"$RULES_DST\""
 fi
 
-# Zárás (Commit)
-log "COMMIT" "Kritikus fájlok visszazárása."
-# KRITIKUS: chattr hiba elnyelése nélkül!
-run chattr +i "$SYSCTL_CONF"
+log "OK" "Baseline IPv6 firewall applied."
 
-# Rollback fájl törlése
-run rm -f "$SYSCTL_CONF_BACKUP"
+# Optional persist (best-effort; does not assume init system)
+if have netfilter-persistent; then
+  log "INFO" "Persisting with netfilter-persistent (best effort)."
+  netfilter-persistent save || true
+fi
 
-log "APPLY COMPLETE: IPv6/Sysctl hardening sikeresen alkalmazva."
+log "INFO" "03 complete. Backups: $BACKUP_ROOT"
 exit 0

@@ -26,8 +26,8 @@ log "" # Új szakasz
 
 # Ellenőrzés: root user
 if [ "$(id -u)" -ne 0 ]; then
-    log "[ERROR] Run as root!" >&2
-    exit 1
+    log "[ERROR] Run as root!" >&2
+    exit 1
 fi
 
 # Feloldó funkció (tranzakció előtt/közben)
@@ -42,8 +42,8 @@ unlock_file() {
 
 # --- TRANZAKCIÓS TISZTÍTÁS (CLEANUP/ROLLBACK) ---
 function branch_cleanup() {
-    log "[CRITICAL ALERT] Hiba történt a 11-es ág futása közben! Megkísérlem a rollbacket..."
-    
+    log "[CRITICAL ALERT] Hiba történt a 11-es ág futása közben! Megkísérlem a rollbacket..."
+    
     # **chattr -i futtatása a feloldott/lezárt fájlokra.**
     for file in "${CRITICAL_FILES[@]}"; do
         if [ -f "$file" ] || [ -d "$file" ]; then
@@ -52,26 +52,26 @@ function branch_cleanup() {
         fi
     done
 
-    # 1. AppArmor eltávolítása (ha van)
-    log "[ACTION] AppArmor csomagok eltávolítása."
-    apt-get purge -y apparmor apparmor-utils
+    # 1. AppArmor eltávolítása (ha van)
+    log "[ACTION] AppArmor csomagok eltávolítása."
+    apt-get purge -y apparmor apparmor-utils
 
-    # 2. Fájlrendszer jogosultságok VISSZAÁLLÍTÁSA (alapértelmezett jogok)
-    log "[WARNING] Fájlrendszer jogosultságok visszaállítása alapértelmezettre (755/644)."
-    
-    # Init.d visszaállítás (755)
-    chmod 755 /etc/init.d || true
+    # 2. Fájlrendszer jogosultságok VISSZAÁLLÍTÁSA (alapértelmezett jogok)
+    log "[WARNING] Fájlrendszer jogosultságok visszaállítása alapértelmezettre (755/644)."
+    
+    # Init.d visszaállítás (755)
+    chmod 755 /etc/init.d || true
     chmod 755 /etc/init.d/* 2>/dev/null || true
-    
-    # SSHD config visszaállítás
-    chmod 644 "$SSHD_CONFIG" 2>/dev/null || true
-    chmod 644 /etc/ssh/ssh_config 2>/dev/null || true
-    
-    # Auditd és Sysctl.d visszaállítás
-    chmod 644 "$SYSCTL_DIR"/* 2>/dev/null || true
-    chmod 644 "$AUDITD_RULES_FILE" 2>/dev/null || true
+    
+    # SSHD config visszaállítás
+    chmod 644 "$SSHD_CONFIG" 2>/dev/null || true
+    chmod 644 /etc/ssh/ssh_config 2>/dev/null || true
+    
+    # Auditd és Sysctl.d visszaállítás
+    chmod 644 "$SYSCTL_DIR"/* 2>/dev/null || true
+    chmod 644 "$AUDITD_RULES_FILE" 2>/dev/null || true
 
-    log "[CRITICAL ALERT] 11-es ág rollback befejezve. Kézi ellenőrzés szükséges!"
+    log "[CRITICAL ALERT] 11-es ág rollback befejezve. Kézi ellenőrzés szükséges!"
     exit 1
 }
 trap branch_cleanup ERR
@@ -130,21 +130,21 @@ apt-get install -y apparmor apparmor-utils
 
 # Kritikus profilok listája
 PROFILES=(
-    usr.sbin.sshd
-    usr.bin.dpkg
-    usr.sbin.cron
-    usr.sbin.rsyslogd
-    usr.sbin.unbound
+    usr.sbin.sshd
+    usr.bin.dpkg
+    usr.sbin.cron
+    usr.sbin.rsyslogd
+    usr.sbin.unbound
 )
 
 # Profilok élesítése (enforce)
 for prof in "${PROFILES[@]}"; do
-    if [ -f "/etc/apparmor.d/$prof" ]; then
-        log "[ACTION] $prof profil kényszerítése (enforce mode)."
-        aa-enforce "$prof"
-    else
-        log "[WARNING] $prof profil nem található, kihagyva."
-    fi
+    if [ -f "/etc/apparmor.d/$prof" ]; then
+        log "[ACTION] $prof profil kényszerítése (enforce mode)."
+        aa-enforce "$prof"
+    else
+        log "[WARNING] $prof profil nem található, kihagyva."
+    fi
 done
 
 # --- 3. COMMIT (IMMUTABILITY LOCK) ---

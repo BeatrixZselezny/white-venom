@@ -1,0 +1,46 @@
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+
+# --- White Venom baseline IPv6 firewall (03) ---
+# This baseline is intentionally conservative:
+# - Default deny inbound, allow outbound.
+# - Allows essential ICMPv6 (ND, errors) and DHCPv6 client traffic.
+# - RA filtering is handled by 04_ipv6_worm_protection (WV_RA_GUARD chain), injected at top of INPUT.
+
+# Loopback
+-A INPUT -i lo -j ACCEPT
+
+# Established/Related
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# DHCPv6 client (inbound replies to client port 546 from server port 547)
+-A INPUT -p udp --sport 547 --dport 546 -j ACCEPT
+
+# Essential ICMPv6 error messages (RFC 4443)
+-A INPUT -p ipv6-icmp --icmpv6-type destination-unreachable -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type packet-too-big -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type time-exceeded -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type parameter-problem -j ACCEPT
+
+# Neighbor Discovery (RFC 4861) - rate limited
+-A INPUT -p ipv6-icmp --icmpv6-type router-solicitation -m limit --limit 50/min -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type router-advertisement -m limit --limit 50/min -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type neighbour-solicitation -m limit --limit 100/min -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type neighbour-advertisement -m limit --limit 100/min -j ACCEPT
+
+# MLD (multicast listener discovery) - conservative allow, rate limited
+-A INPUT -p ipv6-icmp --icmpv6-type 130 -m limit --limit 30/min -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type 131 -m limit --limit 30/min -j ACCEPT
+-A INPUT -p ipv6-icmp --icmpv6-type 132 -m limit --limit 30/min -j ACCEPT
+
+# Optional: allow ping (disabled by default; enable by inserting rules in a local override file)
+# -A INPUT -p ipv6-icmp --icmpv6-type echo-request -m limit --limit 10/second -j ACCEPT
+# -A INPUT -p ipv6-icmp --icmpv6-type echo-reply -j ACCEPT
+
+# Log (rate-limited) then drop
+-A INPUT -m limit --limit 3/min -j LOG --log-prefix "WV6DROP " --log-level 4
+-A INPUT -j DROP
+
+COMMIT
