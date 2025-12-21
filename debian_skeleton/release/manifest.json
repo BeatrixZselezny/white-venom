@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.1",
+
+  "product": "White Venom",
+  "brand": "VW",
+  "channel": "stable",
+  "version": "0.9.0",
+  "released_at_utc": "2025-12-21T00:00:00Z",
+
+  "compat": {
+    "os": "debian",
+    "debian_major": [12, 13],
+    "arch": ["amd64"],
+    "init_target": ["sysvinit"],
+    "notes": "Host may be systemd-installed during development; runner targets prevent destructive apply on host."
+  },
+
+  "signing": {
+    "algorithm": "ed25519",
+    "key_id": "WV-RELEASE-KEY-PRIMARY",
+    "signature_file": "manifest.sig",
+    "signed_object": "manifest.json",
+    "normalization": "UTF-8, LF; signature covers raw manifest.json bytes as shipped."
+  },
+
+  "artifacts": {
+    "bundle": {
+      "filename": "wv-modules.bundle.zst",
+      "compression": "zstd+tar",
+      "sha256": "__BUNDLE_SHA256__",
+      "size_bytes": 0
+    }
+  },
+
+  "runner_policy": {
+    "requires_root": true,
+    "clear_env": true,
+    "shell": "bash",
+    "shell_args": ["--noprofile", "--norc"],
+    "umask": "077",
+    "env_allowlist": {
+      "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG": "C",
+      "LC_ALL": "C",
+      "SKELL_ENV_FILE": "/etc/skell/skell.env"
+    },
+    "working_dir": "/",
+    "extract_root": "/var/lib/white-venom/bundles",
+    "state_file": "/var/lib/white-venom/state.json",
+    "log_dir": "/var/log/white-venom"
+  },
+
+  "capabilities": {
+    "boot_chain": "May touch GRUB, /etc/default/grub, update-grub, grubenv.",
+    "kernel_live": "May apply sysctl to running kernel (sysctl --system).",
+    "package_mgmt": "May run apt/dpkg operations.",
+    "service_mgmt": "May stop/disable services (SysV init scripts, update-rc.d).",
+    "fs_immutable": "May use chattr/immutable operations.",
+    "firewall": "May modify iptables/ip6tables rules.",
+    "mac": "May affect networking stack behavior (RA guard hooks, ND/ICMPv6 hardening)."
+  },
+
+  "targets": {
+    "host_systemd_preserve": {
+      "description": "Development host safety target (systemd PID1 allowed). Enforces non-destructive behavior.",
+      "enforce_mode": "dry-run",
+      "allow_on_systemd_pid1": true,
+      "enabled_caps": {
+        "boot_chain": false,
+        "kernel_live": false,
+        "package_mgmt": false,
+        "service_mgmt": false,
+        "fs_immutable": false,
+        "firewall": false,
+        "mac": false
+      }
+    },
+    "lab_chroot": {
+      "description": "Chroot/lab rootfs target. Never touches host kernel/boot chain.",
+      "allow_on_systemd_pid1": true,
+      "enabled_caps": {
+        "boot_chain": false,
+        "kernel_live": false,
+        "package_mgmt": true,
+        "service_mgmt": false,
+        "fs_immutable": true,
+        "firewall": false,
+        "mac": false
+      }
+    },
+    "vm_full": {
+      "description": "Disposable VM full apply target. Allows end-to-end hardening including kernel/boot chain.",
+      "allow_on_systemd_pid1": true,
+      "enabled_caps": {
+        "boot_chain": true,
+        "kernel_live": true,
+        "package_mgmt": true,
+        "service_mgmt": true,
+        "fs_immutable": true,
+        "firewall": true,
+        "mac": true
+      }
+    }
+  },
+
+  "profiles": {
+    "LEGACY_UPLINK": {
+      "requires": { "ipv4_default_route": true },
+      "notes": "IPv4-only uplink environments (classic hotspot/NAT)."
+    },
+    "V6_NATIVE": {
+      "requires": { "ipv6_default_route": true },
+      "notes": "Native IPv6 uplink environments."
+    }
+  },
+
+  "bootstrap": {
+    "entrypoint": "debian_skeleton/00_install.sh",
+    "canary_path": "/etc/whitevenom_canary",
+    "required_until_canary": true,
+    "supported_modes": ["dry-run", "apply"],
+    "force_flag": "--force-bootstrap"
+  },
+
+  "modules": [
+    { "id": "00_install", "phase": "00", "path": "debian_skeleton/00_install.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["kernel_live", "boot_chain", "package_mgmt", "service_mgmt"], "tags": ["bootstrap"] },
+
+    { "id": "01_orchestrator_legacy", "phase": "01", "path": "debian_skeleton/01_orchestrator.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run"], "requires_caps": [], "tags": ["legacy", "deprecated"], "notes": "Legacy shell orchestrator. Binary runner supersedes this; keep for reference only." },
+
+    { "id": "02_dns_quad9", "phase": "02", "path": "debian_skeleton/02_dns_quad9.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["package_mgmt"], "tags": ["dns", "network"] },
+
+    { "id": "03_sysctl_ip6tables_security", "phase": "03", "path": "debian_skeleton/03_sysctl_ip6tables-security.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["kernel_live", "firewall"], "tags": ["sysctl", "ip6tables"] },
+
+    { "id": "04_ipv6_worm_protection", "phase": "04", "path": "debian_skeleton/04_ipv6_worm_protection.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["firewall", "mac"], "tags": ["ipv6", "ra_guard"] },
+
+    { "id": "05_dpkg_apt_hardening", "phase": "05", "path": "debian_skeleton/05_dpkg_apt_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["package_mgmt", "fs_immutable"], "tags": ["apt", "dpkg"] },
+
+    { "id": "06_essential_packages", "phase": "06", "path": "debian_skeleton/06_essential_packages.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["package_mgmt"], "tags": ["packages"] },
+
+    { "id": "07_audispd_rules", "phase": "07", "path": "debian_skeleton/07_audispd_rules.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["package_mgmt", "service_mgmt"], "tags": ["audit"] },
+
+    { "id": "08_sysv_init_hardening", "phase": "08", "path": "debian_skeleton/08_sysv_init_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["service_mgmt"], "tags": ["init", "sysv"] },
+
+    { "id": "09_apparmor_config_hardening", "phase": "09", "path": "debian_skeleton/09_apparmor_config_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["package_mgmt", "service_mgmt"], "tags": ["apparmor"] },
+
+    { "id": "10_user_ssh_hardening", "phase": "10", "path": "debian_skeleton/10_user_ssh_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["service_mgmt"], "tags": ["ssh"] },
+
+    { "id": "11_fluxbox_hardening", "phase": "11", "path": "debian_skeleton/11_fluxbox_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["package_mgmt"], "tags": ["gui"] },
+
+    { "id": "12_banner_grabbing_hardening", "phase": "12", "path": "debian_skeleton/12_banner_grabbing_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": [], "tags": ["network", "hygiene"] },
+
+    { "id": "13_postgresql_hardening", "phase": "13", "path": "debian_skeleton/13_postgresql_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["package_mgmt", "service_mgmt"], "tags": ["postgresql"] },
+
+    { "id": "14_time_integrity_hardening", "phase": "14", "path": "debian_skeleton/14_time_integrity_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["service_mgmt"], "tags": ["time"] },
+
+    { "id": "15_dev_init", "phase": "15", "path": "debian_skeleton/15_dev_init.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["package_mgmt"], "tags": ["dev"] },
+
+    { "id": "16_module_blacklist", "phase": "16", "path": "debian_skeleton/16_module_blacklist.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["fs_immutable"], "tags": ["kernel", "modules"] },
+
+    { "id": "17_kernel_cmdline_lockdown", "phase": "17", "path": "debian_skeleton/17_kernel_cmdline_lockdown.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["boot_chain"], "tags": ["grub", "kernel"] },
+
+    { "id": "18_stack_canary_enforce", "phase": "18", "path": "debian_skeleton/18_stack_canary_enforce.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["package_mgmt"], "tags": ["toolchain"] },
+
+    { "id": "19_pax_emulation_layer", "phase": "19", "path": "debian_skeleton/19_pax_emulation_layer.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["package_mgmt", "kernel_live"], "tags": ["kernel"] },
+
+    { "id": "20_ptrace_lockdown", "phase": "20", "path": "debian_skeleton/20_ptrace_lockdown.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["kernel_live"], "tags": ["ptrace", "sysctl"] },
+
+    { "id": "21_mount_opts_hardening", "phase": "21", "path": "debian_skeleton/21_mount_opts_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["fs_immutable"], "tags": ["mount", "fs"] },
+
+    { "id": "22_immutable_critical_paths", "phase": "22", "path": "debian_skeleton/22_immutable_critical_paths.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["fs_immutable"], "tags": ["immutable"] },
+
+    { "id": "23_module_signing_config", "phase": "23", "path": "debian_skeleton/23_module_signing_config.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply"], "requires_caps": ["boot_chain", "package_mgmt"], "tags": ["kernel", "signing"] },
+
+    { "id": "24_ssl_cipher_hardening", "phase": "24", "path": "debian_skeleton/24_ssl_cipher_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": [], "tags": ["ssl", "crypto"] },
+
+    { "id": "25_memory_exec_hardening", "phase": "25", "path": "debian_skeleton/25_memory_exec_hardening.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["kernel_live", "fs_immutable"], "tags": ["memory", "exec"] },
+
+    { "id": "90_release_locks", "phase": "90", "path": "debian_skeleton/90_release_locks.sh", "sha256": "__SHA256__", "mode": "0755", "supports_modes": ["dry-run", "apply", "restore"], "requires_caps": ["fs_immutable"], "tags": ["release", "locks"] }
+  ],
+
+  "sequences": {
+    "bootstrap_only": ["00_install"],
+    "full_baseline": [
+      "00_install",
+      "02_dns_quad9",
+      "03_sysctl_ip6tables_security",
+      "04_ipv6_worm_protection",
+      "05_dpkg_apt_hardening",
+      "06_essential_packages",
+      "07_audispd_rules",
+      "08_sysv_init_hardening",
+      "09_apparmor_config_hardening",
+      "10_user_ssh_hardening",
+      "12_banner_grabbing_hardening",
+      "14_time_integrity_hardening",
+      "16_module_blacklist",
+      "17_kernel_cmdline_lockdown",
+      "18_stack_canary_enforce",
+      "19_pax_emulation_layer",
+      "20_ptrace_lockdown",
+      "21_mount_opts_hardening",
+      "22_immutable_critical_paths",
+      "23_module_signing_config",
+      "24_ssl_cipher_hardening",
+      "25_memory_exec_hardening",
+      "90_release_locks"
+    ]
+  },
+
+  "bundle_content_roots": [
+    "debian_skeleton/",
+    "firewall/",
+    "tools/",
+    "scripts/",
+    "backup/",
+    "parking/",
+    "plan.md"
+  ],
+
+  "exclude_globs": [
+    "**/*.bak",
+    "**/*.bak.*",
+    "**/*~"
+  ],
+
+  "legal": {
+    "license_file": "LICENSE.txt",
+    "trademark_file": "TRADEMARK.txt",
+    "redistribution": "prohibited"
+  }
+}
