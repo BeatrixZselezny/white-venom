@@ -10,8 +10,8 @@ set -euo pipefail
 
 # ⚙️ KONFIGURÁCIÓ
 # KRITIKUS JAVÍTÁS: Visszaváltás IPv4-re az Android Hotspot limitáció miatt.
-QUAD9_AAAA1="9.9.9.9"
-QUAD9_AAAA2="149.112.112.112"
+QUAD9_A1="9.9.9.9"
+QUAD9_A2="149.112.112.112"
 RESOLV_CONF="/etc/resolv.conf"
 SCRIPT_NAME="02_DNS_QUAD9"
 
@@ -95,8 +95,8 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
 cat > "$RESOLV_CONF" <<EOF
 # resolv.conf - Generálva a ${SCRIPT_NAME}.sh hardening szkript által
 # ZERO TRUST: Közvetlen Quad9 (IPv4) felé irányítás a hotspot limitáció miatt.
-nameserver $QUAD9_AAAA1
-nameserver $QUAD9_AAAA2
+nameserver $QUAD9_A1
+nameserver $QUAD9_A2
 # Kiegészítő opciók a DNS szigorítására
 options single-request-reopen  # Elkerüljük az IPv4 / IPv6 kettős lekérdezését
 options rotate                 # Egyszerű load balancing
