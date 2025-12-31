@@ -18,7 +18,7 @@ namespace VenomTemplates {
         "net.ipv4.conf.all.accept_source_route=0",
         "net.ipv4.conf.all.accept_redirects=0",
         "net.ipv4.conf.all.secure_redirects=1",
-        "net.ipv4.conf.all.shared_media=0",       // Szükséges a secure_redirects-hez
+        "net.ipv4.conf.all.shared_media=0",
         "net.ipv4.conf.all.log_martians=1",
         "net.ipv4.tcp_syncookies=1",
         "net.ipv4.tcp_rfc1337=1",
@@ -28,7 +28,7 @@ namespace VenomTemplates {
         "fs.protected_hardlinks=1"
     };
 
-    // Kernel modul tiltások (Hardening Blacklist)
+    // Kernel modul tiltások
     const std::vector<std::string> BLACKLIST_CONTENT = {
         "blacklist usb-storage",
         "blacklist firewire-core",
@@ -39,28 +39,26 @@ namespace VenomTemplates {
         "install tipc /bin/true"
     };
 
-    // GRUB Hardening - CPU mitigations (Spectre/Meltdown/HT)
-    const std::vector<std::string> GRUB_HARDENING_CONF = {
-        "# White Venom - GRUB Hardening parameters",
-        "GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash mitigations=auto,nosmt spectre_v2=on page_alloc.shuffle=1 slab_nomerge\"",
-        "GRUB_TIMEOUT=0",
-        "GRUB_RECORDFAIL_TIMEOUT=0"
-    };
+    // [ÚJ] "Széles spektrumú" Kernel Injekció Koktél
+    // Csak a paraméterek, amiket a grub-editenv fog megkapni
+    const std::string KERNEL_HARDENING_PARAMS = 
+        "quiet splash mitigations=auto,nosmt spectre_v2=on spec_store_bypass_disable=on "
+        "l1tf=full,force mds=full,nosmt tsx=off page_alloc.shuffle=1 "
+        "slab_nomerge init_on_alloc=1 init_on_free=1";
 
-    // T1 - Éles FSTAB Hardening (hidepid=2 és szigorú mount opciók)
+    // T1 - Éles FSTAB Hardening (UUID-barát feldolgozáshoz)
     const std::vector<std::string> FSTAB_HARDENING_CONTENT = {
-        "# White Venom - Hardened Mount Points",
         "proc      /proc        proc      defaults,hidepid=2            0     0",
-        "tmpfs     /dev/shm     tmpfs     defaults,nodev,nosuid,noexec  0     0",
-        "tmpfs     /run         tmpfs     defaults,nodev,nosuid,noexec  0     0",
-        "devpts    /dev/pts     devpts    defaults,gid=5,mode=620,noexec 0     0"
+        "tmpfs     /dev/shm     tmpfs     defaults,nodev,nosuid  0     0",
+        "tmpfs     /run         tmpfs     defaults,nodev,nosuid  0     0",
+        "devpts    /dev/pts     devpts    defaults,gid=5,mode=620 0     0"
     };
 
-    // Make.conf - Toolchain optimalizáció (Python mentesen)
+    // Make.conf - Toolchain optimalizáció (Python és Unbound mentesítve)
     const std::vector<std::string> MAKE_CONF_CONTENT = {
         "COMMON_FLAGS=\"-O2 -pipe -fstack-protector-strong -D_FORTIFY_SOURCE=2\"",
         "CHOST=\"x86_64-pc-linux-gnu\"",
-        "USE=\"hardened nosuspnd no-python -unbound\"",
+        "USE=\"hardened nosuspnd -python -unbound\"", // Python és Unbound kigyomlálva
         "ACCEPT_LICENSE=\"*\"",
         "FEATURES=\"sandbox userpriv usersandbox\""
     };
