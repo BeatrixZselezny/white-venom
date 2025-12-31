@@ -6,13 +6,24 @@
 #include <filesystem>
 
 namespace Venom::Init {
-    // Alapvető infrastruktúra felépítése
+    /**
+     * @brief Ellenőrzi a root jogosultságot a beavatkozás előtt.
+     */
+    bool isRoot();
+
+    /**
+     * @brief Létrehozza a biztonságos könyvtárstruktúrát szigorú (0700) jogosultságokkal.
+     */
     bool createSecureSkeleton();
     
-    // RX-Bus előkészítése (Prepared Statements csatornák)
+    /**
+     * @brief RX-Bus előkészítése (Prepared Statements csatornák a fork/execv hívásokhoz).
+     */
     bool setupCommunicationBus();
     
-    // Környezet tisztítása (Environment Sterilization)
+    /**
+     * @brief Teljes környezeti sterilizáció (LD_PRELOAD, PATH, stb. tisztítása).
+     */
     void purgeUnsafeEnvironment();
 }
 
