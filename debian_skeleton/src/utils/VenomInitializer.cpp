@@ -1,57 +1,57 @@
 #include "VenomInitializer.hpp"
+#include "utils/HardeningUtils.hpp"
+#include "utils/ConfigTemplates.hpp"
 #include <iostream>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <filesystem>
 #include <vector>
+#include <cstdlib>
+
+namespace fs = std::filesystem;
 
 namespace Venom::Init {
 
-    // Kiterjesztett sterilizáció a Zero-Trust elv alapján
-    void purgeUnsafeEnvironment() {
-        // T0 sterilizáció: minden olyan változó törlése, ami kódinjekcióra adhat okot
-        unsetenv("LD_PRELOAD");
-        unsetenv("LD_LIBRARY_PATH");
-        unsetenv("PYTHONPATH");
-        unsetenv("PYTHONHOME");
-        
-        // Fix, biztonságos PATH kényszerítése
-        setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin", 1);
-    }
-
-    // Root jogosultság ellenőrzése a műveletek előtt
     bool isRoot() {
         return geteuid() == 0;
     }
 
-    bool createSecureSkeleton() {
-        if (!isRoot()) {
-            std::cerr << "Hiba: A White Venom futtatásához root jogosultság szükséges!" << std::endl;
-            return false;
+    void purgeUnsafeEnvironment() {
+        // Kritikus változók törlése a kódinjekció és Python függőség ellen
+        std::vector<std::string> blacklist = {
+            "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "PERL5LIB", "IFS"
+        };
+        for (const auto& var : blacklist) {
+            unsetenv(var.c_str());
         }
+    }
 
-        // A legfontosabb belső könyvtárak, ahol a "méreg" és a mentések laknak
-        std::vector<std::string> dirs = {
-            "/opt/whitevenom/bin",
-            "/opt/whitevenom/etc",
-            "/opt/whitevenom/bus",
-            "/var/log/Backup" // Szinkronizálva a HardeningUtils-al
+    bool createSecureSkeleton() {
+        if (VenomUtils::DRY_RUN) return true;
+
+        std::vector<std::string> secureDirs = {
+            "/var/log/whitevenom", "/var/log/Backup", "/etc/venom", "/run/venom"
         };
 
-        for (const auto& path : dirs) {
-            std::error_code ec;
-            if (!std::filesystem::exists(path)) {
-                if (!std::filesystem::create_directories(path, ec)) {
-                    return false;
+        try {
+            for (const auto& dir : secureDirs) {
+                if (!fs::exists(dir)) {
+                    fs::create_directories(dir);
                 }
-                
-                // Szigorú jogosultság kényszerítése: drwx------ (0700)
-                // Csak a root láthatja, mi van benne.
-                std::filesystem::permissions(path, 
-                                           std::filesystem::perms::owner_all, 
-                                           std::filesystem::perm_options::replace);
+                // Csak root: rwx------ (0700)
+                fs::permissions(dir, fs::perms::owner_all, fs::perm_options::replace);
             }
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "[ERROR] Skeleton failed: " << e.what() << std::endl;
+            return false;
         }
-        return true;
+    }
+
+    bool deployCanary() {
+        const std::string path = "/etc/venom/integrity.canary";
+        if (VenomUtils::writeProtectedFile(path, VenomTemplates::CANARY_CONTENT)) {
+            return VenomUtils::setImmutable(path, true);
+        }
+        return false;
     }
 }

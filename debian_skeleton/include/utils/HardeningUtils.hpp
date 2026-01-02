@@ -5,25 +5,47 @@
 #include <vector>
 
 namespace VenomUtils {
-    // DRY_RUN flag a biztonságos teszteléshez
+    // Globális flag a biztonságos teszteléshez
     extern bool DRY_RUN;
 
-    // Fájl írása és auditálása (Zero-Trust)
+    /**
+     * @brief ÚJ: A régi ütköző konfigurációk (99-venom*) automatikus eltávolítása.
+     */
+    void cleanLegacyConfigs();
+
+    /**
+     * @brief LD Sanity Check: World-writable könyvtárak keresése (Phase 3.0).
+     */
+    void checkLDSanity();
+
+    /**
+     * @brief Fájl írása Zero-Trust elv alapján (Backup -> Write -> Immutable).
+     */
     bool writeProtectedFile(const std::string& path, const std::vector<std::string>& content);
     
-    // Alacsony szintű ioctl hívás a +i flaghez (audit fázishoz)
+    /**
+     * @brief Alacsony szintű ioctl hívás az immutable flaghez (Native-First).
+     */
     bool setImmutable(const std::string& path, bool secure);
 
-    // [ÚJ] Okos FSTAB frissítés UUID védelemmel
+    /**
+     * @brief FSTAB frissítés natív C++ feldolgozással.
+     */
     bool smartUpdateFstab(const std::vector<std::string>& hardeningLines);
     
-    // [ÚJ] GRUB kernel paraméter injekció (Prepared Statement elv)
+    /**
+     * @brief GRUB kernel paraméter injekció.
+     */
     bool injectGrubKernelOpts(const std::string& opts);
 
-    // Biztonságos folyamatindítás (fork + execv)
+    /**
+     * @brief Biztonságos folyamatindítás fork + execv használatával (Prepared Statement).
+     */
     bool secureExec(const std::string& binary, const std::vector<std::string>& args);
 
-    // Biztonsági mentés SHA256 integritással
+    /**
+     * @brief Biztonsági mentés készítése fájlműveletek előtt.
+     */
     bool createBackup(const std::string& sourcePath);
 }
 

@@ -1,29 +1,41 @@
-CXX = g++
-# Hardened fordítási flagek a C++17 szabvánnyal
-CXXFLAGS = -Wall -Wextra -std=c++17 -Iinclude \
-           -fstack-protector-all -D_FORTIFY_SOURCE=2 \
-           -O2 -pipe
+CXX      = g++
+INC_FLAGS = -Iinclude -Iinclude/utils
+TARGET   = bin/venom_engine
+OBJ_DIR  = obj
+SRC_DIR  = src
 
-# Statikus linkelés a hordozhatóságért
-LDFLAGS = -static -pthread -s
+# Hardened flags: Stack protection, Fortify, és C++17
+CXXFLAGS = $(INC_FLAGS) -Wall -Wextra -std=c++17 \
+           -fstack-protector-strong -fstack-clash-protection \
+           -D_FORTIFY_SOURCE=2 -O2 -pipe
 
-# A forrásfájlok pontos helye a skeletonban
-SRC = src/main.cpp src/utils/HardeningUtils.cpp src/utils/StringUtils.cpp
-OBJ = $(SRC:.cpp=.o)
-TARGET = bin/venom_engine
+# Static linking + RELRO + Bind Now
+LDFLAGS  = -static -pthread -s -Wl,-z,relro,-z,now
 
-all: $(TARGET)
+# JAVÍTOTT: Minden szükséges forrásfájl a listában
+SRC = src/main.cpp \
+      src/utils/HardeningUtils.cpp \
+      src/utils/VenomInitializer.cpp \
+      src/utils/StringUtils.cpp \
+      src/utils/ConfigTemplates.cpp
+
+OBJ = $(SRC:src/%.cpp=$(OBJ_DIR)/%.o)
+
+all: directories $(TARGET)
+
+directories:
+	@mkdir -p bin
+	@mkdir -p $(OBJ_DIR)/utils
 
 $(TARGET): $(OBJ)
-	@mkdir -p bin
-	@echo "[LINK] Creating static binary: $(TARGET)"
-	@$(CXX) $(OBJ) -o $(TARGET) $(LDFLAGS)
+	@echo "[LINK] Creating static hardened binary: $@"
+	@$(CXX) $(OBJ) -o $@ $(LDFLAGS)
 
-# Automatikus szabály az objektumfájlokhoz
-%.o: %.cpp
+$(OBJ_DIR)/%.o: src/%.cpp
 	@echo "[CXX] Compiling $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	@echo "[CLEAN] Cleaning up objects and binaries"
-	@rm -rf bin/* src/*.o src/utils/*.o
+	@rm -rf $(OBJ_DIR) bin/
+
+.PHONY: all clean directories
