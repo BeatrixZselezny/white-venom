@@ -63,12 +63,6 @@ A scriptet LXC konténerben és KVM-alapú virtuális gépen teszteltem. A vált
 
 ## Licenc
 
-Ez a projekt a [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) licenc alatt érhető el.
-
-Ez azt jelenti, hogy:
-
-- A tartalom szabadon másolható, módosítható és terjeszthető **nem kereskedelmi célra**
-- A szerző (white-venom) nevét minden felhasználásnál fel kell tüntetni
-- Módosított verziók csak ugyanezen licenc alatt terjeszthetők
+A projekt a mellékelt LICENSE.md fájlban található egyedi EULA feltételei szerint használható. Kereskedelmi felhasználása szigorúan tilos.
 
 **Kereskedelmi célú felhasználás, értékesítés vagy integráció fizetős szolgáltatásba tilos.**
