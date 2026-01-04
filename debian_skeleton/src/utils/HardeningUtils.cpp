@@ -28,7 +28,7 @@ namespace VenomUtils {
 
         for (const auto& file : legacyFiles) {
             if (fs::exists(file)) {
-                pid_t pid = fork();
+                pid_t pid = fork(); //
                 if (pid == 0) {
                     char* args[] = {(char*)"/usr/bin/rm", (char*)"-f", (char*)file.c_str(), nullptr};
                     execv(args[0], args);
@@ -72,7 +72,7 @@ namespace VenomUtils {
             return false;
         }
 
-        if (secure) flags |= FS_IMMUTABLE_FL;
+        if (secure) flags |= FS_IMMUTABLE_FL; //
         else flags &= ~FS_IMMUTABLE_FL;
 
         bool success = (ioctl(fd, FS_IOC_SETFLAGS, &flags) == 0);
@@ -81,19 +81,19 @@ namespace VenomUtils {
     }
 
     bool smartUpdateFstab(const std::vector<std::string>& hardeningLines) {
-        (void)hardeningLines;
+        (void)hardeningLines; //
         return true;
     }
 
     bool injectGrubKernelOpts(const std::string& opts) {
-        (void)opts;
+        (void)opts; //
         return true;
     }
 
     bool secureExec(const std::string& binary, const std::vector<std::string>& args) {
         if (DRY_RUN) return true;
 
-        pid_t pid = fork();
+        pid_t pid = fork(); //
         if (pid == 0) {
             std::vector<char*> c_args;
             c_args.push_back((char*)binary.c_str());
@@ -101,7 +101,7 @@ namespace VenomUtils {
                 c_args.push_back((char*)arg.c_str());
             }
             c_args.push_back(nullptr);
-            execv(binary.c_str(), c_args.data());
+            execv(binary.c_str(), c_args.data()); //
             _exit(1);
         } else if (pid > 0) {
             int status;
@@ -114,6 +114,7 @@ namespace VenomUtils {
     bool createBackup(const std::string& sourcePath) {
         if (!fs::exists(sourcePath)) return true;
         try {
+            // A te verziód a fájl mellé ment .bak kiterjesztéssel
             fs::copy(sourcePath, sourcePath + ".bak", fs::copy_options::overwrite_existing);
             return true;
         } catch (...) {

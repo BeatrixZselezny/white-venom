@@ -1,18 +1,18 @@
 CXX      = g++
-INC_FLAGS = -Iinclude -Iinclude/utils -Iinclude/core
+INC_FLAGS = -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
 TARGET   = bin/venom_engine
 OBJ_DIR  = obj
 SRC_DIR  = src
 
-# Hardened flags: Stack protection, Fortify, és C++20 a buszhoz
+# Hardened flags: Stack protection, Fortify, C++20 és alacsony szintű optimalizáció
 CXXFLAGS = $(INC_FLAGS) -Wall -Wextra -std=c++20 \
            -fstack-protector-strong -fstack-clash-protection \
            -D_FORTIFY_SOURCE=2 -O2 -pipe
 
-# Static linking + RELRO + Bind Now
+# Static linking + RELRO + Bind Now a támadási felület minimalizálására
 LDFLAGS  = -static -pthread -s -Wl,-z,relro,-z,now
 
-# Minden szükséges forrásfájl (a busz állományaival kiegészítve)
+# Minden C++ forrásfájl - Nincs Python, nincs külső szkript függőség
 SRC = src/main.cpp \
       src/utils/HardeningUtils.cpp \
       src/utils/VenomInitializer.cpp \
@@ -20,7 +20,8 @@ SRC = src/main.cpp \
       src/utils/ConfigTemplates.cpp \
       src/core/VenomBus.cpp \
       src/core/SafeExecutor.cpp \
-      src/core/Scheduler.cpp
+      src/core/Scheduler.cpp \
+      src/modules/SysctlModule.cpp
 
 OBJ = $(SRC:src/%.cpp=$(OBJ_DIR)/%.o)
 
@@ -30,6 +31,7 @@ directories:
 	@mkdir -p bin
 	@mkdir -p $(OBJ_DIR)/utils
 	@mkdir -p $(OBJ_DIR)/core
+	@mkdir -p $(OBJ_DIR)/modules
 
 $(TARGET): $(OBJ)
 	@echo "[LINK] Creating static hardened binary: $@"
