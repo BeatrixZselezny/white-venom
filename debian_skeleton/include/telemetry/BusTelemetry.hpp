@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "telemetry/TelemetryTypes.hpp"
+#include "telemetry/TelemetrySnapshot.hpp"
 
 struct BusTelemetry {
     // Event counters
@@ -25,6 +26,7 @@ struct BusTelemetry {
     std::chrono::milliseconds window_size{250};
 
     BusTelemetry();
+    [[nodiscard]] TelemetrySnapshot snapshot() const;
     void reset_window();
 };
 

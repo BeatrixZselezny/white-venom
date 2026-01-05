@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include "telemetry/BusTelemetry.hpp"
+#include "telemetry/TelemetrySnapshot.hpp"
 
 
 namespace Venom::Core {
@@ -38,6 +39,7 @@ namespace Venom::Core {
 
         // Ring 3: Az összes regisztrált modul futtatása
         void runAll();
+        [[nodiscard]] TelemetrySnapshot getTelemetrySnapshot() const;
 
 
     private:

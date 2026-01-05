@@ -57,4 +57,14 @@ namespace Venom::Core {
             module->run();
         }
     }
+
+
+    /**
+    * @brief Read-only telemetry snapshot lekérése.
+    */
+TelemetrySnapshot VenomBus::getTelemetrySnapshot() const {
+    return telemetry.snapshot();
 }
+
+}
+
