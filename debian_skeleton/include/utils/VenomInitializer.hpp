@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef VENOM_INITIALIZER_HPP
 #define VENOM_INITIALIZER_HPP
 

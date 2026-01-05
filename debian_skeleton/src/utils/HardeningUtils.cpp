@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #include "utils/HardeningUtils.hpp"
 #include <iostream>
 #include <fstream>

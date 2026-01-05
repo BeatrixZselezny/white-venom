@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef CONFIGTEMPLATES_HPP
 #define CONFIGTEMPLATES_HPP
 

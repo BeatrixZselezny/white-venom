@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #include "utils/ConfigTemplates.hpp"
 
 namespace VenomTemplates {

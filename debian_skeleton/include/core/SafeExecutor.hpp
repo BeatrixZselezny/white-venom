@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef SAFE_EXECUTOR_HPP
 #define SAFE_EXECUTOR_HPP
 

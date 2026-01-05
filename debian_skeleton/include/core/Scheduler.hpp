@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef SCHEDULER_HPP
 #define SCHEDULER_HPP
 

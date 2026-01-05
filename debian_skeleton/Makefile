@@ -1,47 +1,51 @@
-CXX      = g++
-INC_FLAGS = -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
-TARGET   = bin/venom_engine
-OBJ_DIR  = obj
-SRC_DIR  = src
+# © 2026 Beatrix Zselezny. All rights reserved.
+# White-Venom Security Framework
 
-# Hardened flags: Stack protection, Fortify, C++20 és alacsony szintű optimalizáció
-CXXFLAGS = $(INC_FLAGS) -Wall -Wextra -std=c++20 \
-           -fstack-protector-strong -fstack-clash-protection \
-           -D_FORTIFY_SOURCE=2 -O2 -pipe
+CXX       := g++
+TARGET    := bin/venom_engine
+SRC_DIR   := src
+OBJ_DIR   := obj
 
-# Static linking + RELRO + Bind Now a támadási felület minimalizálására
-LDFLAGS  = -static -pthread -s -Wl,-z,relro,-z,now
+INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
 
-# Minden C++ forrásfájl - Nincs Python, nincs külső szkript függőség
-SRC = src/main.cpp \
-      src/utils/HardeningUtils.cpp \
-      src/utils/VenomInitializer.cpp \
-      src/utils/StringUtils.cpp \
-      src/utils/ConfigTemplates.cpp \
-      src/core/VenomBus.cpp \
-      src/core/SafeExecutor.cpp \
-      src/core/Scheduler.cpp \
-      src/modules/SysctlModule.cpp
+# Hardened compile flags
+CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 \
+             -fstack-protector-strong -fstack-clash-protection \
+             -D_FORTIFY_SOURCE=2 -O2 -pipe
 
-OBJ = $(SRC:src/%.cpp=$(OBJ_DIR)/%.o)
+# Hardened linker flags (static + RELRO + NOW)
+LDFLAGS   := -static -Wl,-z,relro,-z,now
 
+# Source & object files
+SRC := $(shell find $(SRC_DIR) -name '*.cpp')
+OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
+
+# Default target
 all: directories $(TARGET)
 
+# Create required directories
 directories:
-	@mkdir -p bin
+	@mkdir -p $(OBJ_DIR)
 	@mkdir -p $(OBJ_DIR)/utils
 	@mkdir -p $(OBJ_DIR)/core
 	@mkdir -p $(OBJ_DIR)/modules
+	@mkdir -p bin
 
+# Link
 $(TARGET): $(OBJ)
-	@echo "[LINK] Creating static hardened binary: $@"
+	@echo "[LINK] Creating hardened binary: $@"
 	@$(CXX) $(OBJ) -o $@ $(LDFLAGS)
 
-$(OBJ_DIR)/%.o: src/%.cpp
+# Compile
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo "[CXX] Compiling $<"
+	@mkdir -p $(dir $@)
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Cleanup
 clean:
-	@rm -rf $(OBJ_DIR) bin/
+	@echo "[CLEAN] Removing build artifacts"
+	@rm -rf $(OBJ_DIR) bin
 
 .PHONY: all clean directories
+

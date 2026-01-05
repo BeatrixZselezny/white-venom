@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef SYSCTL_MODULE_HPP
 #define SYSCTL_MODULE_HPP
 

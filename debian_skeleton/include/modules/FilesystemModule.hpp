@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef FILESYSTEM_MODULE_HPP
 #define FILESYSTEM_MODULE_HPP
 

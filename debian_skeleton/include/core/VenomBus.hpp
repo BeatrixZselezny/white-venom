@@ -1,9 +1,14 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #ifndef VENOM_BUS_HPP
 #define VENOM_BUS_HPP
 
 #include <vector>
 #include <memory>
 #include <string>
+#include "telemetry/BusTelemetry.hpp"
+
 
 namespace Venom::Core {
 
@@ -33,6 +38,11 @@ namespace Venom::Core {
 
         // Ring 3: Az összes regisztrált modul futtatása
         void runAll();
+
+
+    private:
+        BusTelemetry telemetry;
+
     };
 }
 

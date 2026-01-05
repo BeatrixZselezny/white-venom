@@ -1,14 +1,6 @@
-/*
- * End User License Agreement (EULA) - White-Venom (VW)
- * Verzió: 1.0 | Dátum: 2026.01.03 | Szerző: white-venom
- *
- * A Szoftver kizárólag SZEMÉLYES, OKTATÁSI vagy KUTATÁSI célokra használható.
- * Kereskedelmi értékesítése, átcsomagolása (repackaging) vagy szolgáltatásként 
- * való nyújtása (SaaS) a Szerző írásos engedélye nélkül szigorúan TILOS.
- * A Szoftver logikája és egyedi megoldásai szerzői jogi védelem alatt állnak.
- * A Szoftver "ahogy van" állapotban kerül átadásra, felelősséget a használatért
- * a Szerző nem vállal.
- */
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 
 #include <iostream>
 #include <string>

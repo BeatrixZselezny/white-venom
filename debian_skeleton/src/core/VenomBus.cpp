@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #include "VenomBus.hpp"
 #include "SafeExecutor.hpp" // Ring 2 csatolása
 #include <iostream>
@@ -28,15 +31,23 @@ namespace Venom::Core {
      * Csak strukturált adatokat (bináris + argumentum vektor) fogad el.
      */
     void VenomBus::dispatchCommand(const std::string& binary, const std::vector<std::string>& args) {
+
+        telemetry.total_events++;
         // A busz a SafeExecutor segítségével hajtatja végre a parancsot
         // shell-mentesen, fork/execv hívással.
         bool success = SafeExecutor::execute(binary, args); 
         
         if (!success) {
+            telemetry.dropped_events++;
             // Hiba esetén kritikus riasztás küldése az audit logba
             std::cerr << "[VenomBus] KRITIKUS: Sikertelen végrehajtás: " << binary << std::endl;
+
+            return;
         }
+
+         telemetry.accepted_events++;
     }
+
 
     /**
      * @brief Ring 3: Az ütemező által hívott futtatási ciklus.
