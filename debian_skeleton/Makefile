@@ -1,50 +1,63 @@
-# © 2026 Beatrix Zselezny. All rights reserved.
-# White-Venom Security Framework
+# © 2026 Beatrix Zselezny
+# White Venom – Release Makefile (Debian Trixie only)
 
 CXX       := g++
 TARGET    := bin/venom_engine
 SRC_DIR   := src
 OBJ_DIR   := obj
 
+# ==== HARD REQUIREMENTS ====
+REQUIRED_GLIBC := 2.38
+
+GLIBC_VER := $(shell ldd --version | head -n1 | sed 's/.* //')
+
+ifeq ($(shell printf '%s\n%s\n' "$(REQUIRED_GLIBC)" "$(GLIBC_VER)" | sort -V | head -n1),$(REQUIRED_GLIBC))
+else
+$(error "White Venom requires glibc >= $(REQUIRED_GLIBC). Found $(GLIBC_VER)")
+endif
+
+# ==== INCLUDE PATHS ====
 INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
 
-# Hardened compile flags
-CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 \
-             -fstack-protector-strong -fstack-clash-protection \
-             -D_FORTIFY_SOURCE=2 -O2 -pipe
+# ==== COMPILER HARDENING (NO FALLBACK) ====
+CXXFLAGS := $(INC_FLAGS) -std=c++20 -O2 -pipe \
+  -Wall -Wextra -Wpedantic \
+  -fstack-protector-strong \
+  -fstack-clash-protection \
+  -fPIE \
+  -fcf-protection=full \
+  -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 \
+  -fno-plt \
+  -fno-strict-overflow \
+  -fno-delete-null-pointer-checks
 
-# Hardened linker flags (static + RELRO + NOW)
-LDFLAGS   := -static -Wl,-z,relro,-z,now
+# ==== LINKER HARDENING ====
+LDFLAGS := -static -pie \
+  -Wl,-z,relro \
+  -Wl,-z,now \
+  -Wl,-z,noexecstack \
+  -Wl,--build-id=sha1 \
+  -Wl,--as-needed
 
-# Source & object files
+# ==== SOURCES ====
 SRC := $(shell find $(SRC_DIR) -name '*.cpp')
 OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
 
-# Default target
 all: directories $(TARGET)
 
-# Create required directories
 directories:
-	@mkdir -p $(OBJ_DIR)
-	@mkdir -p $(OBJ_DIR)/utils
-	@mkdir -p $(OBJ_DIR)/core
-	@mkdir -p $(OBJ_DIR)/modules
-	@mkdir -p bin
+	@mkdir -p $(OBJ_DIR) $(OBJ_DIR)/utils $(OBJ_DIR)/core $(OBJ_DIR)/modules bin
 
-# Link
 $(TARGET): $(OBJ)
-	@echo "[LINK] Creating hardened binary: $@"
+	@echo "[LINK] White Venom hardened binary"
 	@$(CXX) $(OBJ) -o $@ $(LDFLAGS)
 
-# Compile
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@echo "[CXX] Compiling $<"
+	@echo "[CXX] $<"
 	@mkdir -p $(dir $@)
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Cleanup
 clean:
-	@echo "[CLEAN] Removing build artifacts"
 	@rm -rf $(OBJ_DIR) bin
 
 .PHONY: all clean directories
