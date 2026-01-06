@@ -1,77 +1,78 @@
-// © 2026 Beatrix Zselezny
+// © 2026 Beatrix Zselezny. All rights reserved.
 // White-Venom Security Framework
 
+
 #include <iostream>
-// POSIX umask for early filesystem hardening
-#include <sys/stat.h>
-#include <memory>
 #include <string>
 #include <vector>
+#include <memory>
 
-#include <unistd.h>
-#include <sys/prctl.h>
-#include <sys/resource.h>
-#include <linux/seccomp.h>
-
-// Core
+// Core összetevők
 #include "core/VenomBus.hpp"
 #include "core/Scheduler.hpp"
 #include "core/SafeExecutor.hpp"
 
-// Modules
+// Modulok
 #include "modules/SysctlModule.hpp"
 
-[[noreturn]] static void hard_fail() {
-    _exit(127);
-}
+// Utils és Init
+#include "VenomInitializer.hpp"
+#include "utils/HardeningUtils.hpp"
+#include "utils/ConfigTemplates.hpp"
 
-static void early_hardening() {
-    if (clearenv() != 0) hard_fail();
-
-    if (setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin", 1) != 0)
-        hard_fail();
-
-    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
-        hard_fail();
-
-    if (prctl(PR_SET_DUMPABLE, 0) != 0)
-        hard_fail();
-
-    struct rlimit rl {};
-    rl.rlim_cur = rl.rlim_max = 0;
-    if (setrlimit(RLIMIT_CORE, &rl) != 0)
-        hard_fail();
-
-    umask(077);
-
-    // Mandatory seccomp baseline (no probing)
-    if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_STRICT) != 0)
-        hard_fail();
-}
+/**
+ * White Venom Hardened Engine - Main Entry Point
+ * Platform: Debian (Zero Trust Process Integrity)
+ */
 
 int main(int argc, char* argv[]) {
-    // === MUST RUN FIRST ===
-    early_hardening();
-
     bool serviceMode = false;
-    if (argc > 1 && std::string(argv[1]) == "--service") {
-        serviceMode = true;
+
+    // Argumentumok feldolgozása
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--dry-run") {
+            VenomUtils::DRY_RUN = true;
+        } else if (arg == "--service") {
+            serviceMode = true;
+        }
     }
 
-    auto bus = std::make_unique<Venom::Core::VenomBus>();
+    // T0: Környezet sterilizáció és root check
+    Venom::Init::purgeUnsafeEnvironment();
+    
+    if (!Venom::Init::isRoot()) {
+        std::cerr << "[ERROR] Root privileges required for Debian hardening." << std::endl;
+        return 1;
+    }
 
-    bus->registerModule(std::make_unique<Venom::Modules::SysctlModule>());
+    // A központi Busz inicializálása
+    auto bus = std::make_shared<Venom::Core::VenomBus>();
 
+    // Modulok regisztrálása (Alacsony szintű natív implementáció)
+    bus->registerModule(std::make_shared<Venom::Modules::SysctlModule>());
+
+    // Rendszer-előkészítés és integritás
+    VenomUtils::checkLDSanity();
+    Venom::Init::createSecureSkeleton();
+    
+    // Debian konfigurációs bootstrap
+    VenomUtils::writeProtectedFile("/etc/make.conf", VenomTemplates::MAKE_CONF_CONTENT);
+
+    // Canary integritás-figyelő aktiválása
+    Venom::Init::deployCanary();
+
+    // Futtatási ciklus indítása
     if (serviceMode) {
-        // Ring 3 – long-running scheduler
+        // Ring 3: Biztonsági ütemező (5 perces ciklus)
         Venom::Core::Scheduler scheduler(300);
         scheduler.start(*bus);
     } else {
-        // Ring 1 – one-shot bootstrap
+        // Ring 1: Egyszeri bootstrap futtatás
         bus->runAll();
     }
 
-    std::cout << "[SUCCESS] White Venom engine operation completed.\n";
+    std::cout << "[SUCCESS] White Venom engine operation completed." << std::endl;
+    
     return 0;
 }
-
