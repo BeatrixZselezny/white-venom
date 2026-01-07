@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include "utils/ExecPolicyRegistry.hpp"
 
 namespace Venom::Core {
     class SafeExecutor {

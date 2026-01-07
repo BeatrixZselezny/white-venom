@@ -6,23 +6,31 @@
 
 #include "core/VenomBus.hpp"
 #include <string>
+#include <vector>
 
 namespace Venom::Modules {
-    /**
-     * @brief Modul a fájlrendszer hardening és modul blacklist feladatokhoz.
-     */
+
+    struct FilesystemPathPolicy {
+        std::string path;
+        bool mustExist       = true;
+        bool mustBeDirectory = true;
+        bool allowWorldWrite = false;
+    };
+
     class FilesystemModule : public Venom::Core::IBusModule {
     public:
-        /**
-         * @brief Visszaadja a modul nevét a busz számára.
-         */
-        std::string getName() const override { return "FilesystemHardening"; }
+        FilesystemModule();
 
-        /**
-         * @brief Végrehajtja a tisztítást, a blacklist írását és az fstab frissítését.
-         */
+        std::string getName() const override;
         void run() override;
+
+    private:
+        std::vector<FilesystemPathPolicy> policies;
+
+        void auditPath(const FilesystemPathPolicy& policy);
     };
+
 }
 
 #endif
+
