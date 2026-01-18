@@ -1,0 +1,15 @@
+<map id="Venom::Modules::InitSecurityModule::run" name="Venom::Modules::InitSecurityModule::run">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,133,217,173"/>
+<area shape="rect" id="Node000002" href="$classVenom_1_1Security_1_1ExecPolicyRegistry.html#a55bbe1b36bf46a1f3e54da03c0225527" title=" " alt="" coords="275,69,479,109"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="194,131,280,110,281,115,196,136"/>
+<area shape="rect" id="Node000005" href="$classVenom_1_1Modules_1_1InitSecurityModule.html#aa441878c9d64cf75819159df558264b6" title="A GRUB környezet injektálása aszinkron módon." alt="" coords="265,133,488,173"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="218,151,251,151,251,156,218,156"/>
+<area shape="rect" id="Node000007" href="$classVenom_1_1Security_1_1ExecPolicyRegistry.html#a3e80bf10574682b5d70d4745670cfc43" title=" " alt="" coords="275,197,479,237"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="196,171,281,192,280,197,194,176"/>
+<area shape="rect" id="Node000003" href="$classVenom_1_1Security_1_1ExecPolicyRegistry.html#af088083e7b9c92627d77f1360bb53392" title=" " alt="" coords="536,5,740,45"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="458,67,542,46,543,51,460,72"/>
+<area shape="rect" id="Node000004" href="$namespaceVenom_1_1Security.html#a6aa4d35efcc2da6239908c4a34977682" title=" " alt="" coords="544,69,732,109"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="479,87,530,87,530,92,479,92"/>
+<area shape="rect" id="Node000006" href="$classVenom_1_1Core_1_1SafeExecutor.html#a75fd6d19e9332a88952c8b8348af4dab" title="Reaktív (nem&#45;blokkoló) végrehajtás. Egy Observable&#45;t ad vissza, ami a kilépési kódot (exit code) emit..." alt="" coords="539,133,737,173"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="488,151,525,151,525,156,488,156"/>
+</map>

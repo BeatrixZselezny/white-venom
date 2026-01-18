@@ -1,0 +1,7 @@
+<map id="Venom::Init::deployCanary" name="Venom::Init::deployCanary">
+<area shape="rect" id="Node000001" title="Elhelyezi az integritást jelző Canary fájlt (Phase 5.0)." alt="" coords="5,31,200,56"/>
+<area shape="rect" id="Node000002" href="$namespaceVenomUtils.html#ab064550c6426baf6cb5c28d485847b81" title="Alacsony szintű ioctl hívás az immutable flaghez (Native&#45;First)." alt="" coords="261,5,457,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="200,31,247,26,248,32,200,36"/>
+<area shape="rect" id="Node000003" href="$namespaceVenomUtils.html#ad949ddbbafe9c97749bc3ad59785062f" title="Fájl írása Zero&#45;Trust elv alapján (Backup &#45;&gt; Write &#45;&gt; Immutable)." alt="" coords="248,55,471,80"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="200,50,235,53,234,58,200,55"/>
+</map>

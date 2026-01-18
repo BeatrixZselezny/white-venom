@@ -1,0 +1,5 @@
+<map id="Venom::Modules::InitSecurityModule" name="Venom::Modules::InitSecurityModule">
+<area shape="rect" id="Node000001" title="Stage 0: A legkritikusabb biztonsági alapozás. Ez a modul felelős a kernel paraméterek és a biztonság..." alt="" coords="5,119,209,259"/>
+<area shape="rect" id="Node000002" title=" " alt="" coords="17,5,198,71"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="110,84,110,118,105,118,105,84"/>
+</map>

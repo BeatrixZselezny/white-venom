@@ -1,0 +1,5 @@
+<map id="Venom::Modules::InitSecurityModule::injectKernelHardening" name="Venom::Modules::InitSecurityModule::injectKernelHardening">
+<area shape="rect" id="Node000001" title="A GRUB környezet injektálása aszinkron módon." alt="" coords="5,5,228,45"/>
+<area shape="rect" id="Node000002" href="$classVenom_1_1Core_1_1SafeExecutor.html#a75fd6d19e9332a88952c8b8348af4dab" title="Reaktív (nem&#45;blokkoló) végrehajtás. Egy Observable&#45;t ad vissza, ami a kilépési kódot (exit code) emit..." alt="" coords="276,5,475,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="228,23,262,23,262,28,228,28"/>
+</map>

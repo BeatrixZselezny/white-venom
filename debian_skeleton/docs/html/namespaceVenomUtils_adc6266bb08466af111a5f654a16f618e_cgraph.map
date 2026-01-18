@@ -1,0 +1,5 @@
+<map id="VenomUtils::replaceHttpWithHttps" name="VenomUtils::replaceHttpWithHttps">
+<area shape="rect" id="Node000001" title="Biztonságos HTTPS kényszerítés." alt="" coords="5,5,216,45"/>
+<area shape="rect" id="Node000002" href="$namespaceVenomUtils.html#a01ba3d5850fe8401b3f5db496ce109c7" title="Minden előfordulást lecserél a szövegben." alt="" coords="264,13,435,38"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="216,23,250,23,250,28,216,28"/>
+</map>

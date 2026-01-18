@@ -1,8 +1,9 @@
-
-# local adhoc backups
-00_install.sh.bak.*
-00_install.sh.pre_restore.*
-
-# local adhoc backups
-00_install.sh.bak.*
-00_install.sh.pre_restore.*
+# Ignore binaries and objects
+bin/
+obj/
+*.o
+*.a
+# Ignore logs and temp files
+buggy.txt
+*.log
+docs/html/

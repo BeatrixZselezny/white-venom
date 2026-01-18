@@ -1,0 +1,19 @@
+<map id="main" name="main">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,145,60,171"/>
+<area shape="rect" id="Node000002" href="$namespaceVenomUtils.html#a218440615243b72d77cd00d974dd5d19" title="LD Sanity Check: World&#45;writable könyvtárak keresése (Phase 3.0)." alt="" coords="108,5,309,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="36,144,61,94,81,65,106,41,118,34,121,39,110,45,85,69,65,97,41,146"/>
+<area shape="rect" id="Node000003" href="$namespaceVenom_1_1Init.html#a21c1666d390964186bf88f3e15e25672" title="Létrehozza a biztonságos könyvtárstruktúrát (Phase 4.0)." alt="" coords="114,55,303,95"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="48,143,75,124,107,105,123,98,125,103,109,110,78,128,51,147"/>
+<area shape="rect" id="Node000004" href="$namespaceVenom_1_1Init.html#a0f7d454a03a2534ce46206527642bb28" title="Elhelyezi az integritást jelző Canary fájlt (Phase 5.0)." alt="" coords="111,120,306,145"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="60,152,107,145,108,150,61,157"/>
+<area shape="rect" id="Node000007" href="$namespaceVenom_1_1Init.html#aff5cece48f2086e046d2f07606f9af10" title="Ellenőrzi a root jogosultságot (Phase 0.0)." alt="" coords="136,169,281,195"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="61,159,123,168,122,173,60,164"/>
+<area shape="rect" id="Node000008" href="$namespaceVenom_1_1Init.html#a19a714bf5f0b3cbf775ba320a082b0a7" title="Teljes környezeti sterilizáció (T0). Törli az LD_PRELOAD, PYTHONPATH és egyéb veszélyes változókat." alt="" coords="115,219,302,259"/>
+<area shape="poly" id="edge7_Node000001_Node000008" title=" " alt="" coords="52,169,78,187,109,205,125,212,123,217,107,210,75,192,49,173"/>
+<area shape="rect" id="Node000009" href="$classVenom_1_1Core_1_1Scheduler.html#a5a68848ffd85eb5d40511d91f925cb2c" title=" " alt="" coords="120,283,297,323"/>
+<area shape="poly" id="edge8_Node000001_Node000009" title=" " alt="" coords="41,170,66,218,86,246,110,269,117,274,114,279,106,273,82,249,61,221,37,172"/>
+<area shape="rect" id="Node000005" href="$namespaceVenomUtils.html#ab064550c6426baf6cb5c28d485847b81" title="Alacsony szintű ioctl hívás az immutable flaghez (Native&#45;First)." alt="" coords="371,96,567,121"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="306,121,357,116,357,122,306,126"/>
+<area shape="rect" id="Node000006" href="$namespaceVenomUtils.html#ad949ddbbafe9c97749bc3ad59785062f" title="Fájl írása Zero&#45;Trust elv alapján (Backup &#45;&gt; Write &#45;&gt; Immutable)." alt="" coords="357,145,580,171"/>
+<area shape="poly" id="edge5_Node000004_Node000006" title=" " alt="" coords="306,139,344,143,343,148,306,145"/>
+</map>
