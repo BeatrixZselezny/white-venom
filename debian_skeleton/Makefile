@@ -9,16 +9,25 @@ OBJ_DIR   := obj
 INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
 
 # Hardened compile flags
-CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 \
+# JAVÍTÁS: -pthread hozzáadva a C++20 mellé
+CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 -pthread \
              -fstack-protector-strong -fstack-clash-protection \
              -D_FORTIFY_SOURCE=2 -O2 -pipe
 
-# Hardened linker flags (static + RELRO + NOW)
-LDFLAGS   := -static -Wl,-z,relro,-z,now
+# Hardened linker flags
+# JAVÍTÁS: -pthread itt is kell
+LDFLAGS   := -static -Wl,-z,relro,-z,now -pthread
 
-# Source & object files
-SRC := $(shell find $(SRC_DIR) -name '*.cpp')
-OBJ := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
+# Source files
+# JAVÍTÁS: Csak azokat fordítjuk, amik már készen vannak!
+# Ha a "find"-ot használnánk, elhasalna a régi Utils fájlokon.
+SRC := src/main.cpp \
+       src/core/VenomBus.cpp \
+       src/core/Scheduler.cpp \
+       src/telemetry/BusTelemetry.cpp \
+       src/modules/InitSecurityModule.cpp
+
+OBJ := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SRC)))
 
 # Default target
 all: directories $(TARGET)
@@ -26,20 +35,30 @@ all: directories $(TARGET)
 # Create required directories
 directories:
 	@mkdir -p $(OBJ_DIR)
-	@mkdir -p $(OBJ_DIR)/utils
-	@mkdir -p $(OBJ_DIR)/core
-	@mkdir -p $(OBJ_DIR)/modules
 	@mkdir -p bin
 
 # Link
 $(TARGET): $(OBJ)
 	@echo "[LINK] Creating hardened binary: $@"
-	@$(CXX) $(OBJ) -o $@ $(LDFLAGS)
+	# Mivel a patsubst lapította a könyvtárakat, itt a find paranccsal gyűjtjük össze az o-kat
+	@$(CXX) $(shell find $(OBJ_DIR) -name '*.o') -o $@ $(LDFLAGS)
 
 # Compile
+# Figyelem: Ez a szabály most egyszerűsítve van, hogy minden src mappát lefedjen
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo "[CXX] Compiling $<"
-	@mkdir -p $(dir $@)
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/core/%.cpp
+	@echo "[CXX] Compiling $<"
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/telemetry/%.cpp
+	@echo "[CXX] Compiling $<"
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/modules/%.cpp
+	@echo "[CXX] Compiling $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Cleanup
@@ -48,4 +67,3 @@ clean:
 	@rm -rf $(OBJ_DIR) bin
 
 .PHONY: all clean directories
-

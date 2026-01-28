@@ -1,18 +1,20 @@
 #pragma once
 
-#include "core/VenomBus.hpp"
 #include <string>
+
+// MÁR NEM KELL: #include "core/VenomBus.hpp"
+// Mivel megszüntettük az IBusModule interfészt.
 
 namespace Venom::Modules {
 
-class InitSecurityModule final : public Venom::Core::IBusModule {
+class InitSecurityModule final { // Nincs többé : public ...
 public:
-    std::string getName() const override {
+    std::string getName() const {
         return "InitSecurityModule";
     }
 
-    void run() override;
+    // A régi "run()" helyett, mivel már nincs override
+    void execute();
 };
 
 }
-

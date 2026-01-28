@@ -4,47 +4,69 @@
 #ifndef VENOM_BUS_HPP
 #define VENOM_BUS_HPP
 
-#include <vector>
 #include <memory>
 #include <string>
-#include "telemetry/BusTelemetry.hpp"
-#include "telemetry/TelemetrySnapshot.hpp"
+#include "rxcpp/rx.hpp"
 
+// Telemetria és Típusok
+#include "telemetry/BusTelemetry.hpp"
+#include "TimeCubeTypes.hpp"
 
 namespace Venom::Core {
 
+    // Forward declaration a Schedulerhez
+    class Scheduler;
+
     /**
-     * @brief Absztrakt alaposztály minden modulnak.
+     * @brief Esemény típus a Vent buszon (Nyers adat)
      */
-    class IBusModule {
-    public:
-        virtual ~IBusModule() = default;
-        virtual std::string getName() const = 0;
-        virtual void run() = 0; 
+    struct VentEvent {
+        std::string source;
+        std::string payload;
+        // Később bővíthetjük a StreamProbe adatokkal
     };
 
     /**
-     * @brief Ring 1: A központi kommunikációs busz és modulregiszter.
+     * @brief Parancs típus a Cortex buszon (Validált akció)
+     */
+    struct CortexCommand {
+        std::string targetModule;
+        std::string action;
+    };
+
+    /**
+     * @brief Ring 1: Dual-Venom Bus Controller
+     * Facade pattern: elrejti a két belső Rx buszt a külvilág elől.
      */
     class VenomBus {
     private:
-        std::vector<std::shared_ptr<IBusModule>> registry;
+        // --- The Twin Buses ---
+        
+        // 1. The Vent (Input/Data Plane)
+        rxcpp::subjects::subject<VentEvent> vent_bus;
+
+        // 2. The Cortex (Control/Logic Plane)
+        rxcpp::subjects::subject<CortexCommand> cortex_bus;
+
+        // --- Telemetry ---
+        BusTelemetry telemetry;
+        TimeCubeBaseline timeCubeBaseline;
 
     public:
-        // Modul regisztrálása a buszon
-        void registerModule(std::shared_ptr<IBusModule> module);
+        VenomBus();
         
-        // A SafeExecutor felé néző biztonságos kapu
-        void dispatchCommand(const std::string& binary, const std::vector<std::string>& args);
+        // --- Public API (Publishing) ---
+        
+        // Nyers adat betolása a rendszerbe (pl. inotify által)
+        void pushEvent(const std::string& source, const std::string& data);
 
-        // Ring 3: Az összes regisztrált modul futtatása
-        void runAll();
+        // --- Lifecycle Management ---
+        
+        // A Scheduler hívja meg, hogy felépítse a reaktív láncot (pipeline)
+        void startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler);
+
+        // --- Diagnostics ---
         [[nodiscard]] TelemetrySnapshot getTelemetrySnapshot() const;
-
-
-    private:
-        BusTelemetry telemetry;
-
     };
 }
 

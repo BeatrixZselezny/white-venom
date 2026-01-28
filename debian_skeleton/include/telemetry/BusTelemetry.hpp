@@ -25,6 +25,14 @@ struct BusTelemetry {
     std::chrono::steady_clock::time_point window_start;
     std::chrono::milliseconds window_size{250};
 
+    // ÚJ: Time-Cube specifikus metrikák
+    std::atomic<uint64_t> time_cube_violations{0};
+    std::atomic<SecurityProfile> current_profile{SecurityProfile::NORMAL};
+
+    // ... függvények ...
+    void record_violation() { time_cube_violations++; }
+    void set_profile(SecurityProfile p) { current_profile.store(p); }
+
     BusTelemetry();
     [[nodiscard]] TelemetrySnapshot snapshot() const;
     void reset_window();

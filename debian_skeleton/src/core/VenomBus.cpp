@@ -1,107 +1,89 @@
 // © 2026 Beatrix Zselezny. All rights reserved.
 // White-Venom Security Framework
 
-#include "VenomBus.hpp"
-#include "SafeExecutor.hpp"               // Ring 2 csatolása
-#include "utils/ExecPolicyRegistry.hpp"   // Exec policy enforcement
+#include "core/VenomBus.hpp"
+#include "core/Scheduler.hpp"
 #include <iostream>
-#include <algorithm>
 
 namespace Venom::Core {
 
-    /**
-     * @brief Ring 1: Modul regisztrálása a busz belső névtárába.
-     */
-    void VenomBus::registerModule(std::shared_ptr<IBusModule> module) {
-        if (!module) return;
-
-        auto it = std::find_if(
-            registry.begin(),
-            registry.end(),
-            [&module](const std::shared_ptr<IBusModule>& m) {
-                return m->getName() == module->getName();
-            }
-        );
-
-        if (it == registry.end()) {
-            registry.push_back(module);
-            // Később Logger-rel kiváltjuk
-            std::cout << "[VenomBus] Modul regisztrálva: "
-                      << module->getName() << std::endl;
-        }
+    VenomBus::VenomBus() {
+        // Inicializáljuk a telemetriát
+        telemetry.reset_window();
     }
 
     /**
-     * @brief Ring 2 Gateway: A SafeExecutor felé néző kapu.
-     * Csak policy-vel engedélyezett, strukturált parancsokat hajt végre.
+     * @brief A külvilág (pl. inotify) ezen keresztül tolja be az adatot.
+     * Ez Thread-Safe, bármelyik szálról hívható.
      */
-    void VenomBus::dispatchCommand(
-        const std::string& binary,
-        const std::vector<std::string>& args)
-    {
+    void VenomBus::pushEvent(const std::string& source, const std::string& data) {
+        // Telemetria növelése (Atomic, szóval biztonságos)
         telemetry.total_events++;
+        telemetry.queue_depth++;
 
-        using Venom::Security::ExecPolicyRegistry;
-
-        // 1️⃣ Exec policy lookup – FAIL CLOSED
-        const auto& policy =
-            ExecPolicyRegistry::instance().getPolicy(binary);
-
-        // 2️⃣ Strukturális korlátok
-        if (args.size() > policy.maxArgs) {
-            telemetry.dropped_events++;
-            std::cerr << "[VenomBus] POLICY: túl sok argumentum: "
-                      << binary << std::endl;
-            return;
-        }
-
-        for (const auto& a : args) {
-            if (a.size() > policy.maxArgLen) {
-                telemetry.dropped_events++;
-                std::cerr << "[VenomBus] POLICY: túl hosszú argumentum: "
-                          << binary << std::endl;
-                return;
-            }
-        }
-
-        // 3️⃣ Szemantikus (binary-specifikus) validáció
-        try {
-            policy.validate(args);
-        } catch (const std::exception& e) {
-            telemetry.dropped_events++;
-            std::cerr << "[VenomBus] POLICY: validációs hiba: "
-                      << e.what() << std::endl;
-            return;
-        }
-
-        // 4️⃣ Végrehajtás SafeExecutor-rel (változatlan)
-        bool success = SafeExecutor::execute(binary, args);
-
-        if (!success) {
-            telemetry.dropped_events++;
-            std::cerr << "[VenomBus] KRITIKUS: Sikertelen végrehajtás: "
-                      << binary << std::endl;
-            return;
-        }
-
-        telemetry.accepted_events++;
+        // Bedobjuk az eseményt a "Vent" (szellőző) buszba
+        // Ez még nem dolgozza fel, csak beleteszi a csőbe.
+        vent_bus.get_subscriber().on_next(VentEvent{source, data});
     }
 
     /**
-     * @brief Ring 3: Az ütemező által hívott futtatási ciklus.
+     * @brief Itt történik a csoda: összekötjük a két buszt a Schedulerrel.
      */
-    void VenomBus::runAll() {
-        for (auto& module : registry) {
-            module->run();
-        }
+    void VenomBus::startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler) {
+        
+        // --- THE PIPELINE ---
+        
+        vent_bus.get_observable()
+            // 1. Lépés: Átadás a Vent Schedulernek (Worker Thread Pool)
+            // JAVÍTÁS: rxcpp::observe_on_one_worker() csomagolás kell!
+            .observe_on(rxcpp::observe_on_one_worker(scheduler.getVentScheduler()))
+            
+            .tap([this](const VentEvent& e) {
+                // Debug log (opcionális)
+                // std::cout << "[Vent] Bejövő adat: " << e.source << std::endl;
+            })
+
+            // 2. Lépés: Stream Probe & Routing
+            .map([this](VentEvent e) -> CortexCommand {
+                return CortexCommand{e.source, "ANALYZE_REQUEST"};
+            })
+            
+            // 3. Lépés: Time-Cube Filter (Szűrés)
+            .filter([this](const CortexCommand& cmd) {
+                // Time-Cube logika helye
+                return true;
+            })
+
+            // 4. Lépés: Váltás a Cortex Schedulerre (Dedikált vezérlő szál)
+            // JAVÍTÁS: Itt is rxcpp::observe_on_one_worker() csomagolás kell!
+            .observe_on(rxcpp::observe_on_one_worker(scheduler.getCortexScheduler()))
+
+            // 5. Lépés: Végrehajtás (Subscription)
+            .subscribe(
+                lifetime,
+                
+                // OnNext (Siker)
+                [this](CortexCommand cmd) {
+                    telemetry.accepted_events++;
+                    telemetry.queue_depth--;
+                },
+                
+                // OnError (Hiba)
+                [](std::exception_ptr ep) {
+                    std::cerr << "[VenomBus] Hiba a pipeline-ban!" << std::endl;
+                },
+
+                // OnCompleted (Vége)
+                []() {
+                    std::cout << "[VenomBus] Pipeline lezárult." << std::endl;
+                }
+            );
+            
+        std::cout << "[VenomBus] Reaktív pipeline felépítve: Vent -> Cortex" << std::endl;
     }
 
-    /**
-     * @brief Read-only telemetry snapshot lekérése.
-     */
     TelemetrySnapshot VenomBus::getTelemetrySnapshot() const {
         return telemetry.snapshot();
     }
 
 } // namespace Venom::Core
-
