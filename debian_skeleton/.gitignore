@@ -7,3 +7,5 @@ obj/
 buggy.txt
 *.log
 docs/html/
+obj/
+bin/

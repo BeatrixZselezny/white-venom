@@ -35,10 +35,10 @@ namespace Venom::Core {
         
         vent_bus.get_observable()
             // 1. Lépés: Átadás a Vent Schedulernek (Worker Thread Pool)
-            // JAVÍTÁS: rxcpp::observe_on_one_worker() csomagolás kell!
             .observe_on(rxcpp::observe_on_one_worker(scheduler.getVentScheduler()))
             
-            .tap([this](const VentEvent& e) {
+            // JAVÍTVA: /*e*/ kommenttel, hogy ne sírjon a fordító
+            .tap([this](const VentEvent& /*e*/) {
                 // Debug log (opcionális)
                 // std::cout << "[Vent] Bejövő adat: " << e.source << std::endl;
             })
@@ -49,27 +49,27 @@ namespace Venom::Core {
             })
             
             // 3. Lépés: Time-Cube Filter (Szűrés)
-            .filter([this](const CortexCommand& cmd) {
+            // JAVÍTVA: /*cmd*/ kommenttel
+            .filter([this](const CortexCommand& /*cmd*/) {
                 // Time-Cube logika helye
                 return true;
             })
 
             // 4. Lépés: Váltás a Cortex Schedulerre (Dedikált vezérlő szál)
-            // JAVÍTÁS: Itt is rxcpp::observe_on_one_worker() csomagolás kell!
             .observe_on(rxcpp::observe_on_one_worker(scheduler.getCortexScheduler()))
 
             // 5. Lépés: Végrehajtás (Subscription)
             .subscribe(
                 lifetime,
                 
-                // OnNext (Siker)
-                [this](CortexCommand cmd) {
+                // OnNext (Siker) - JAVÍTVA: /*cmd*/
+                [this](CortexCommand /*cmd*/) {
                     telemetry.accepted_events++;
                     telemetry.queue_depth--;
                 },
                 
-                // OnError (Hiba)
-                [](std::exception_ptr ep) {
+                // OnError (Hiba) - JAVÍTVA: /*ep*/
+                [](std::exception_ptr /*ep*/) {
                     std::cerr << "[VenomBus] Hiba a pipeline-ban!" << std::endl;
                 },
 

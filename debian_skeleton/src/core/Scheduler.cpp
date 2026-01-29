@@ -25,6 +25,7 @@ namespace Venom::Core {
 
     void Scheduler::start(VenomBus& bus) {
         if (running) return;
+        (void)bus;
         running = true;
 
         std::cout << "[Scheduler] Dual-Bus Engines Starting..." << std::endl;

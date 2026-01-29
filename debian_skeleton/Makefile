@@ -9,23 +9,21 @@ OBJ_DIR   := obj
 INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
 
 # Hardened compile flags
-# JAVÍTÁS: -pthread hozzáadva a C++20 mellé
 CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 -pthread \
              -fstack-protector-strong -fstack-clash-protection \
              -D_FORTIFY_SOURCE=2 -O2 -pipe
 
 # Hardened linker flags
-# JAVÍTÁS: -pthread itt is kell
 LDFLAGS   := -static -Wl,-z,relro,-z,now -pthread
 
 # Source files
-# JAVÍTÁS: Csak azokat fordítjuk, amik már készen vannak!
-# Ha a "find"-ot használnánk, elhasalna a régi Utils fájlokon.
+# ITT A JAVÍTÁS: Hozzáadtuk a FilesystemModule.cpp-t a listához!
 SRC := src/main.cpp \
        src/core/VenomBus.cpp \
        src/core/Scheduler.cpp \
        src/telemetry/BusTelemetry.cpp \
-       src/modules/InitSecurityModule.cpp
+       src/modules/InitSecurityModule.cpp \
+       src/modules/FilesystemModule.cpp
 
 OBJ := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SRC)))
 
@@ -40,11 +38,9 @@ directories:
 # Link
 $(TARGET): $(OBJ)
 	@echo "[LINK] Creating hardened binary: $@"
-	# Mivel a patsubst lapította a könyvtárakat, itt a find paranccsal gyűjtjük össze az o-kat
 	@$(CXX) $(shell find $(OBJ_DIR) -name '*.o') -o $@ $(LDFLAGS)
 
-# Compile
-# Figyelem: Ez a szabály most egyszerűsítve van, hogy minden src mappát lefedjen
+# Compile Rules
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo "[CXX] Compiling $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
