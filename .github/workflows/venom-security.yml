@@ -1,0 +1,62 @@
+name: 🐍 White-Venom Security & Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  schedule:
+    - cron: '30 4 * * *'
+
+jobs:
+  # 1. C++ Audit
+  cpp-sast:
+    name: C++ Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cppcheck
+        run: sudo apt-get install -y cppcheck
+      - name: Run Cppcheck
+        run: |
+          cppcheck . --enable=all --inconclusive --error-exitcode=1 \
+             --suppress=missingIncludeSystem \
+             --suppress=checkersReport \
+             --suppress=unmatchedSuppression \
+             --inline-suppr \
+             --verbose
+
+  # 2. Shell Script Audit (EZ AZ ÚJ!)
+  shell-audit:
+    name: ShellCheck (Bash scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        # Megkeresi az összes .sh fájlt és ellenőrzi
+        run: shellcheck **/*.sh || echo "ShellCheck found issues (non-fatal for now)"
+
+  # 3. Trivy (Titkok)
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  # 4. Build Test (Fordul-e?)
+  build:
+    name: Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure CMake
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build
