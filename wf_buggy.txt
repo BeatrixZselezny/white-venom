@@ -1,12 +1,8 @@
 
 
 
-    BeatrixZselezny
-    white-venom
-
-
-🐍 White-Venom Security & Build
-fix(build): Add subdirectories to include path for SafeExecutor #5
+🛡️ Zero Trust Security Audit
+Merge pull request #4 from BeatrixZselezny/dependabot/maven/org.apach… #19
 
 All jobs
 
@@ -14,98 +10,63 @@ Run details
 
 Annotations
 1 error
-C++ Code Analysis
-failed Feb 5, 2026 in 34s
+vulnerability-scan
+failed Feb 5, 2026 in 23s
+3s
+1s
+15s
+2026-02-05T14:17:57Z	INFO	[secret] Please see https://trivy.dev/docs/v0.68/guide/scanner/secret#recommendation for faster secret detection
+2026-02-05T14:18:01Z	WARN	[pom] Dependency version cannot be determined. Child dependencies will not be found.	details="https://trivy.dev/docs/v0.68/guide/coverage/language/java#empty-dependency-version"
+2026-02-05T14:18:01Z	INFO	Number of language-specific files	num=3
+2026-02-05T14:18:01Z	INFO	[pom] Detecting vulnerabilities...
+
+📣 Notices:
+  - Version 0.69.1 of Trivy is now available, current version is 0.68.1
+
+
+To suppress version checks, run Trivy scans with the --skip-version-check flag
+
+Report Summary
+
+┌───────────────────────┬──────┬─────────────────┬─────────┐
+│        Target         │ Type │ Vulnerabilities │ Secrets │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ patchy-audit/pom.xml  │ pom  │        0        │    -    │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ patchy-parent/pom.xml │ pom  │        0        │    -    │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ pom.xml               │ pom  │        1        │    -    │
+└───────────────────────┴──────┴───────��─────────┴─────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+
+For OSS Maintainers: VEX Notice
+--------------------------------
+If you're an OSS maintainer and Trivy has detected vulnerabilities in your project that you believe are not actually exploitable, consider issuing a VEX (Vulnerability Exploitability eXchange) statement.
+VEX allows you to communicate the actual status of vulnerabilities in your project, improving security transparency and reducing false positives for your users.
+Learn more and start using VEX: https://trivy.dev/docs/v0.68/guide/supply-chain/vex/repo#publishing-vex-documents
+
+To disable this notice, set the TRIVY_DISABLE_VEX_NOTICE environment variable.
+
+
+pom.xml (pom)
+=============
+Total: 1 (HIGH: 1, CRITICAL: 0)
+
+┌──────────────────────────────────────┬────────────────┬──────────┬────────┬───────────────────┬───────────────┬────────────────────────────────────────────────────────┐
+│               Library                │ Vulnerability  │ Severity │ Status │ Installed Version │ Fixed Version │                         Title                          │
+├──────────────────────────────────────┼────────────────┼──────────┼────────┼───────────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ org.springframework.boot:spring-boot │ CVE-2025-22235 │ HIGH     │ fixed  │ 3.4.2             │ 3.3.11, 3.4.5 │ org.springframework.boot/spring-boot: Spring Boot      │
+│                                      │                │          │        │                   │               │ EndpointRequest.to() creates wrong matcher if actuator │
+│                                      │                │          │        │                   │               │ endpoint is not...                                     │
+│                                      │                │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2025-22235             │
+└──────────────────────────────────────┴────────────────┴──────────┴────────┴───────────────────┴───────────────┴────────────────────────────────────────────────────────┘
+Error: Process completed with exit code 1.
+Run rm -f trivy_envs.txt
+  
 0s
 1s
-4s
-27s
-                    ^
-debian_skeleton/src/modules/FilesystemModule.cpp:132:48: style: C-style pointer casting detected. C++ offers four different kinds of casts as replacements: static_cast, const_cast, dynamic_cast and reinterpret_cast. A C-style cast could evaluate to any of those automatically, thus it is considered safer if the programmer explicitly states which kind of cast is expected. [cstyleCast]
-                struct inotify_event* event = (struct inotify_event*)&buffer[i];
-                                               ^
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_DELETE;RXCPP_RX_UTIL_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_DELETE;RXCPP_RX_UTIL_HPP;_MSC_VER...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_HASH_ENUM;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_HASH_ENUM_UNDERLYING;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_ON_ANDROID;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_ON_IOS;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_USE_EXCEPTIONS;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_USE_RTTI;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_USE_RVALUEREF;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_USE_VARIADIC_TEMPLATES;RXCPP_RX_INCLUDES_HPP...
-Checking debian_skeleton/src/modules/FilesystemModule.cpp: RXCPP_FORCE_USE_WINRT;RXCPP_RX_INCLUDES_HPP...
-7/15 files checked 53% done
-Checking debian_skeleton/src/modules/InitSecurityModule.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-debian_skeleton/include/modules/InitSecurityModule.hpp:17:10: performance: inconclusive: The member function 'Venom::Modules::InitSecurityModule::execute' can be made a static function. Making a function static can bring a performance benefit since no 'this' instance is passed to the function. This change should not cause compiler errors but it does not necessarily make sense conceptually. Think about your design and the task of the function first - is it a function that must not access members of class instances? And maybe it is more appropriate to move this function to an unnamed namespace. [functionStatic]
-    void execute();
-         ^
-debian_skeleton/src/modules/InitSecurityModule.cpp:13:30: note: Technically the member function 'Venom::Modules::InitSecurityModule::execute' can be static (but you may consider moving to unnamed namespace).
-    void InitSecurityModule::execute() {
-                             ^
-debian_skeleton/include/modules/InitSecurityModule.hpp:17:10: note: Technically the member function 'Venom::Modules::InitSecurityModule::execute' can be static (but you may consider moving to unnamed namespace).
-    void execute();
-         ^
-8/15 files checked 56% done
-Checking debian_skeleton/src/telemetry/BusTelemetry.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-9/15 files checked 59% done
-Checking debian_skeleton/src/utils/ConfigTemplates.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-10/15 files checked 70% done
-Checking debian_skeleton/src/utils/ExecPolicyRegistry.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-11/15 files checked 73% done
-Checking debian_skeleton/src/utils/HardeningUtils.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-debian_skeleton/src/utils/HardeningUtils.cpp:36:37: style: C-style pointer casting detected. C++ offers four different kinds of casts as replacements: static_cast, const_cast, dynamic_cast and reinterpret_cast. A C-style cast could evaluate to any of those automatically, thus it is considered safer if the programmer explicitly states which kind of cast is expected. [cstyleCast]
-                    char* args[] = {(char*)"/usr/bin/rm", (char*)"-f", (char*)file.c_str(), nullptr};
-                                    ^
-debian_skeleton/src/utils/HardeningUtils.cpp:102:30: style: C-style pointer casting detected. C++ offers four different kinds of casts as replacements: static_cast, const_cast, dynamic_cast and reinterpret_cast. A C-style cast could evaluate to any of those automatically, thus it is considered safer if the programmer explicitly states which kind of cast is expected. [cstyleCast]
-            c_args.push_back((char*)binary.c_str());
-                             ^
-debian_skeleton/src/utils/HardeningUtils.cpp:104:34: style: C-style pointer casting detected. C++ offers four different kinds of casts as replacements: static_cast, const_cast, dynamic_cast and reinterpret_cast. A C-style cast could evaluate to any of those automatically, thus it is considered safer if the programmer explicitly states which kind of cast is expected. [cstyleCast]
-                c_args.push_back((char*)arg.c_str());
-                                 ^
-debian_skeleton/src/utils/HardeningUtils.cpp:104:24: style: Consider using std::transform algorithm instead of a raw loop. [useStlAlgorithm]
-                c_args.push_back((char*)arg.c_str());
-                       ^
-12/15 files checked 87% done
-Checking debian_skeleton/src/utils/StringUtils.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-13/15 files checked 91% done
-Checking debian_skeleton/src/utils/SysctlPolicy.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-14/15 files checked 93% done
-Checking debian_skeleton/src/utils/VenomInitializer.cpp ...
-Defines:
-Undefines:
-Includes: -Idebian_skeleton/include/
-Platform:native
-15/15 files checked 100% done
-Error: Process completed with exit code 1.
-0s
 0s
 
