@@ -6,6 +6,7 @@
 #include "core/StreamProbe.hpp"
 #include "core/NullScheduler.hpp"
 #include <iostream>
+#include <vector>
 
 namespace Venom::Core {
 
@@ -21,47 +22,60 @@ namespace Venom::Core {
 
     void VenomBus::startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler) {
         
-        // TimeCube baseTickMs paramétere alapján számoljuk a debounce-ot
-        auto debounceTime = std::chrono::milliseconds(static_cast<long>(timeCubeBaseline.baseTickMs));
+        auto baseTick = std::chrono::milliseconds(static_cast<long>(timeCubeBaseline.baseTickMs));
 
-        // A trükk: Előbb elkészítjük az observable-t, és csak a végén iratkozunk fel
         vent_bus.get_observable()
             .group_by([](const VentEvent& e) { return e.source; })
-            .map([this, &scheduler, debounceTime, &lifetime](rxcpp::grouped_observable<std::string, VentEvent> grouped_obs) {
-                // Itt a grouped_obs típusa már garantáltan helyes
-                return grouped_obs
-                    .debounce(debounceTime)
-                    .observe_on(rxcpp::observe_on_one_worker(scheduler.getVentScheduler()))
-                    .map([this](VentEvent e) {
-                        auto profile = telemetry.current_profile.load();
-                        auto detected = StreamProbe::detectZeroTrust(e.payload, profile);
-                        return std::make_pair(e, detected);
+            // FONTOS: Itt NEM adunk át lifetime-ot, és explicit típust használunk!
+            .subscribe([this, &scheduler, baseTick, lifetime](rxcpp::grouped_observable<std::string, VentEvent> grouped_obs) {
+                
+                grouped_obs
+                    .window_with_time_or_count(std::chrono::milliseconds(200), 10)
+                    .flat_map([this, &scheduler](rxcpp::observable<VentEvent> window) {
+                        
+                        return window.reduce(
+                            std::vector<VentEvent>(),
+                            [](std::vector<VentEvent> acc, VentEvent v) {
+                                acc.push_back(v);
+                                return acc;
+                            })
+                        .map([this, &scheduler](std::vector<VentEvent> batch) {
+                            if (batch.empty()) return 0;
+
+                            // Metabolizmus alapú dinamikus küszöb [cite: 21]
+                            auto meta = telemetry.get_metabolism();
+                            double dynamicThreshold = 6.8 * (1.0 / (meta.loadFactor + 0.1));
+
+                            for (const auto& event : batch) {
+                                auto profile = telemetry.current_profile.load();
+                                auto detected = StreamProbe::detectZeroTrust(event.payload, profile);
+
+                                double entropy = StreamProbe::calculateEntropy(event.payload);
+                                bool isSuspicious = (entropy > dynamicThreshold);
+
+                                bool shouldAbsorb = (detected == DataType::BINARY || isSuspicious);
+                                auto target = shouldAbsorb ? scheduler.getNullScheduler() : scheduler.getCortexScheduler();
+
+                                rxcpp::observable<>::just(event)
+                                    .observe_on(rxcpp::observe_on_one_worker(target))
+                                    .subscribe([this, shouldAbsorb](VentEvent e) {
+                                        if (shouldAbsorb) {
+                                            NullScheduler::absorb(e);
+                                            telemetry.null_routed_events++;
+                                        } else {
+                                            telemetry.accepted_events++;
+                                        }
+                                        telemetry.queue_depth--;
+                                    });
+                            }
+                            return 0;
+                        });
                     })
-                    .map([this, &scheduler](std::pair<VentEvent, DataType> result) {
-                        auto event = result.first;
-                        auto detected = result.second;
-
-                        bool shouldAbsorb = (detected == DataType::BINARY || detected == DataType::UNKNOWN);
-                        auto target = shouldAbsorb ? scheduler.getNullScheduler() : scheduler.getCortexScheduler();
-
-                        // Az utolsó láncszem: a tényleges végrehajtás
-                        rxcpp::observable<>::just(event)
-                            .observe_on(rxcpp::observe_on_one_worker(target))
-                            .subscribe([this, shouldAbsorb](VentEvent e) {
-                                if (shouldAbsorb) {
-                                    NullScheduler::absorb(e);
-                                    telemetry.null_routed_events++;
-                                } else {
-                                    telemetry.accepted_events++;
-                                }
-                                telemetry.queue_depth--;
-                            });
-                        return 0; // Dummy return a map-nek
-                    });
-            })
-            .subscribe(lifetime, [](auto) {}); 
+                    // A belső láncot ráfűzzük a fő élettartamra
+                    .subscribe(lifetime, [](auto){});
+            });
             
-        std::cout << "[VenomBus] Zero-Trust immun-pipeline aktív (Safe-Type Mode)." << std::endl;
+        std::cout << "[VenomBus] Adaptív szakaszos pipeline aktív (Type-Safe Fix)." << std::endl;
     }
 
     TelemetrySnapshot VenomBus::getTelemetrySnapshot() const {

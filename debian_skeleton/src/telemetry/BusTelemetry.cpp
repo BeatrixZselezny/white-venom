@@ -3,6 +3,8 @@
 
 #include "telemetry/BusTelemetry.hpp"
 
+namespace Venom::Core {
+
 BusTelemetry::BusTelemetry()
     : window_start(std::chrono::steady_clock::now())
 {
@@ -11,6 +13,25 @@ BusTelemetry::BusTelemetry()
 void BusTelemetry::reset_window() {
     peak_queue_depth.store(queue_depth.load());
     window_start = std::chrono::steady_clock::now();
+}
+
+SystemMetabolism BusTelemetry::get_metabolism() const {
+    SystemMetabolism meta;
+    
+    // Alap referencia tick
+    meta.referenceTickMs = 100.0; 
+    
+    auto now = std::chrono::steady_clock::now();
+    double duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - window_start).count();
+    
+    uint64_t events = total_events.load();
+    // Átlagos tick hossz mérése
+    meta.currentTickMs = (events > 0) ? (duration / events) : meta.referenceTickMs;
+    
+    // LoadFactor: Terheltségi mutató
+    meta.loadFactor = meta.currentTickMs / meta.referenceTickMs;
+    
+    return meta;
 }
 
 TelemetrySnapshot BusTelemetry::snapshot() const {
@@ -25,8 +46,6 @@ TelemetrySnapshot BusTelemetry::snapshot() const {
     snap.queue_peak    = peak_queue_depth.load();
 
     snap.state = state.load();
-    
-    // Itt adjuk át az aktuális profilt a snapshotnak
     snap.current_profile = current_profile.load();
 
     snap.window_ms =
@@ -36,3 +55,5 @@ TelemetrySnapshot BusTelemetry::snapshot() const {
 
     return snap;
 }
+
+} // namespace Venom::Core
