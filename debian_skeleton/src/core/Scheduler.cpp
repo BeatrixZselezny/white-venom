@@ -1,22 +1,24 @@
 // © 2026 Beatrix Zselezny. All rights reserved.
 // White-Venom Security Framework
+// Dual-Bus Scheduler Implementation: Vent, Cortex, and Null domains.
 
-// FONTOS: Helyes útvonalak a mappastruktúrához!
 #include "core/Scheduler.hpp"
 #include "core/VenomBus.hpp" 
 #include <iostream>
 
 namespace Venom::Core {
 
-    // Itt a konstruktor megvalósítása, amihez most már illeszkedni fog a header
     Scheduler::Scheduler() {
-        // Inicializáljuk a két "hajtóművet"
-        
-        // 1. Vent: Worker Thread Pool a nagy forgalomhoz
+        // 1. Vent: Párhuzamos worker pool az események fogadásához és előszűréséhez.
         vent_scheduler = rxcpp::schedulers::make_event_loop();
         
-        // 2. Cortex: Dedikált szál a precíz döntésekhez
+        // 2. Cortex: Egyetlen, dedikált szál a biztonsági logika futtatásához.
+        // Ezzel garantáljuk a determinisztikus sorrendiséget a döntéseknél.
         cortex_scheduler = rxcpp::schedulers::make_new_thread();
+        
+        // 3. Null: Az elnyelő (sink). Az RxCpp current_thread-et használjuk,
+        // ami azonnal végrehajtja (vagyis elnyeli) a feladatot extra erőforrás nélkül.
+        null_scheduler = rxcpp::schedulers::make_current_thread();
     }
 
     Scheduler::~Scheduler() {
@@ -25,27 +27,23 @@ namespace Venom::Core {
 
     void Scheduler::start(VenomBus& bus) {
         if (running) return;
-        (void)bus;
+        (void)bus; // A busz reaktív láncát maga a VenomBus indítja el.
         running = true;
 
-        std::cout << "[Scheduler] Dual-Bus Engines Starting..." << std::endl;
-        
-        // Itt még nincs "while" ciklus, csak az RxCpp indítása
-        // bus.startReactive(lifetime, *this); 
-        
-        std::cout << "[Scheduler] Systems Active. Press Ctrl+C to stop." << std::endl;
+        std::cout << "[Scheduler] Dual-Bus Engines (with Null-Sink) Active." << std::endl;
     }
 
     void Scheduler::stop() {
         if (!running) return;
         
-        std::cout << "[Scheduler] Stopping subsystems..." << std::endl;
+        std::cout << "[Scheduler] Stopping subsystems and clearing subscriptions..." << std::endl;
         
-        // Most már ismerni fogja a 'lifetime'-ot, mert benne van a headerben
+        // Felszabadítjuk a reaktív láncokat, hogy ne maradjanak függő szálak.
         if (lifetime.is_subscribed()) {
             lifetime.unsubscribe();
         }
 
         running = false;
     }
-}
+
+} // namespace Venom::Core

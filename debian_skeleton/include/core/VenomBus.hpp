@@ -8,22 +8,21 @@
 #include <string>
 #include "rxcpp/rx.hpp"
 
-// Telemetria és Típusok
+// Alapvető típusok és szondák
+#include "core/StreamProbe.hpp"     // Szükséges a DataType enum miatt
 #include "telemetry/BusTelemetry.hpp"
 #include "TimeCubeTypes.hpp"
 
 namespace Venom::Core {
 
-    // Forward declaration a Schedulerhez
-    class Scheduler;
+    class Scheduler; // Forward declaration
 
     /**
-     * @brief Esemény típus a Vent buszon (Nyers adat)
+     * @brief Esemény típus a Vent buszon (Nyers adat) [cite: 3]
      */
     struct VentEvent {
         std::string source;
         std::string payload;
-        // Később bővíthetjük a StreamProbe adatokkal
     };
 
     /**
@@ -36,36 +35,28 @@ namespace Venom::Core {
 
     /**
      * @brief Ring 1: Dual-Venom Bus Controller
-     * Facade pattern: elrejti a két belső Rx buszt a külvilág elől.
+     * Feladata a stream osztályozása és determinisztikus irányítása. [cite: 4, 61]
      */
     class VenomBus {
     private:
         // --- The Twin Buses ---
-        
-        // 1. The Vent (Input/Data Plane)
         rxcpp::subjects::subject<VentEvent> vent_bus;
-
-        // 2. The Cortex (Control/Logic Plane)
         rxcpp::subjects::subject<CortexCommand> cortex_bus;
 
-        // --- Telemetry ---
+        // --- Infrastructure ---
         BusTelemetry telemetry;
         TimeCubeBaseline timeCubeBaseline;
 
     public:
         VenomBus();
         
-        // --- Public API (Publishing) ---
-        
-        // Nyers adat betolása a rendszerbe (pl. inotify által)
+        // Nyers adat betolása (Thread-safe)
         void pushEvent(const std::string& source, const std::string& data);
-
-        // --- Lifecycle Management ---
         
-        // A Scheduler hívja meg, hogy felépítse a reaktív láncot (pipeline)
+        // A reaktív pipeline elindítása [cite: 91]
         void startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler);
 
-        // --- Diagnostics ---
+        // Diagnosztika
         [[nodiscard]] TelemetrySnapshot getTelemetrySnapshot() const;
     };
 }

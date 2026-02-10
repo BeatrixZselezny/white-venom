@@ -1,3 +1,6 @@
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
 #include "telemetry/BusTelemetry.hpp"
 
 BusTelemetry::BusTelemetry()
@@ -22,6 +25,9 @@ TelemetrySnapshot BusTelemetry::snapshot() const {
     snap.queue_peak    = peak_queue_depth.load();
 
     snap.state = state.load();
+    
+    // Itt adjuk át az aktuális profilt a snapshotnak
+    snap.current_profile = current_profile.load();
 
     snap.window_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -30,4 +36,3 @@ TelemetrySnapshot BusTelemetry::snapshot() const {
 
     return snap;
 }
-

@@ -16,11 +16,12 @@ CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 -pthread \
 # Hardened linker flags
 LDFLAGS   := -static -Wl,-z,relro,-z,now -pthread
 
-# Source files
-# ITT A JAVÍTÁS: Hozzáadtuk a FilesystemModule.cpp-t a listához!
+# Source files - BŐVÍTVE AZ ÚJ ASZINKRON MODULOKKAL
 SRC := src/main.cpp \
        src/core/VenomBus.cpp \
        src/core/Scheduler.cpp \
+       src/core/StreamProbe.cpp \
+       src/core/NullScheduler.cpp \
        src/telemetry/BusTelemetry.cpp \
        src/modules/InitSecurityModule.cpp \
        src/modules/FilesystemModule.cpp

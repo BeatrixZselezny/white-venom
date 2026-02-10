@@ -1,68 +1,199 @@
+# White Venom
 
-# Debian Security Hardening Bootstrap
-## Repository: white-venom
+> **Security-first Debian hardening framework**  
+> *Originally Bash. Evolving into C++.*
 
+## Overview
 
-SecurityDebian-bootstrap hardening with orchectrator.
+**White Venom** is a security-hardening framework focused on **Debian-based systems**, designed to apply **aggressive, layered system hardening** in a deterministic and auditable way.
 
-## Cél
+The project started as a large, orchestrated **Bash-based hardening system** and is now in the process of being **re-architected into a C++ core**, while still retaining shell scripts where they make sense (bootstrapping, early-stage system interaction).
 
-Ez a projekt egy shell-alapú bootstrap script, amely Debian 11/12 rendszerek biztonsági keményítését végzi el. A cél a minimális támadási felület kialakítása, alapértelmezett szolgáltatások auditálása, és a rendszer viselkedésének kiszámíthatóvá tétele.
+This is **not** a beginner-friendly project. It assumes:
 
-## Funkciók
+* deep familiarity with Linux internals
+* understanding of Debian packaging, boot process, kernel hardening
+* willingness to break and rebuild systems
 
-- SSH konfiguráció keményítése:
-  - `PermitRootLogin no`
-  - `PasswordAuthentication no`
-  - `MaxAuthTries`, `LoginGraceTime`, `AllowUsers` beállítások
-- `sysctl` kernel security paraméterek:
-  - Kernel
-  - Networking
-  - FS
-- `auditd` telepítése és alapértelmezett szabályok betöltése
-- Mamória védelem - Canary
-- Strict minimal install (pl. `telnet`, `rsh`, `xinetd`)
-- Dpkg-APT minimalizált hardening
-- Journald és logrotate konfiguráció megerősítése
-- Alapértelmezett tűzfal (iptables/nftables) szabályok inicializálása
-- DNS hardening QUAD9
-- NTP hardening, szoftveres és hardveres óra biztonsági konfiguráció
+---
 
-## Használat
+## Why Bash → C++
+
+The original Bash implementation proved effective but hit hard limits:
+
+* complexity explosion
+* weak typing and poor refactoring guarantees
+* limited testability
+* orchestration logic becoming fragile
+
+The C++ rewrite aims to provide:
+
+* **strongly typed core orchestration**
+* explicit dependency graphs between hardening stages
+* reusable, testable modules
+* better long-term maintainability
+
+> Bash is still used where it is *the right tool*. White Venom is **not** a dogmatic rewrite.
+
+---
+
+## Project Status
+
+⚠️ **Early transition phase**
+
+* Bash-based hardening is **functional and extensive**
+* C++ core exists but is **under active development**
+* APIs, directory layout, and abstractions may change
+
+Think of it as:
+
+> *A Ferrari on jack stands — the engine is being rebuilt.*
+
+---
+
+## Repository Layout (High Level)
+
+```
+white-venom/
+├── debian_skeleton/        # Core hardening system (Bash + C++)
+├── scripts/                # Supporting / helper scripts
+├── docs/                   # Documentation
+├── plan/                   # Design notes and planning artifacts
+├── CMakeLists.txt          # C++ build system entry point
+├── README.md               # (this file)
+├── CHANGELOG.md
+└── LICENSE.md
+```
+
+---
+
+## debian_skeleton/
+
+This directory contains the **heart of White Venom**.
+
+### Bash hardening stages
+
+The numbered scripts represent **ordered hardening phases**:
+
+```
+00_install.sh
+01_orchestrator.sh
+02_dns_quad9.sh
+...
+25_memory_exec_hardening.sh
+```
+
+Each stage targets a **specific attack surface**:
+
+* kernel behavior
+* memory protections
+* userspace hardening
+* networking
+* services
+* filesystem immutability
+
+The numbering is intentional and meaningful.
+
+---
+
+### C++ Core
+
+The emerging C++ implementation lives here:
+
+```
+debian_skeleton/
+├── include/
+│   ├── core/        # Core abstractions, orchestration logic
+│   ├── modules/     # Hardening modules (C++)
+│   ├── telemetry/   # Logging / observability
+│   ├── utils/       # Shared utilities
+│   └── TimeCubeTypes.hpp
+│
+├── src/
+│   ├── core/
+│   ├── modules/
+│   ├── telemetry/
+│   ├── utils/
+│   └── main.cpp
+```
+
+#### Design goals
+
+* explicit execution graph instead of implicit script order
+* separation between **what** is hardened and **how**
+* future support for dry-run, audit-only, and rollback modes
+
+---
+
+## Build (C++ Core)
+
+Basic out-of-tree build:
 
 ```bash
-curl -s https://raw.githubusercontent.com/<user>/debian-hardening-bootstrap/main/bootstrap.sh | bash
+mkdir build
+cd build
+cmake ..
+make
 ```
 
+> Expect build system changes while the architecture stabilizes.
 
-**Figyelem:** A script root jogosultságot igényel. Minden lépés logolva van, és visszavonható.
+---
 
-## Rendszerkövetelmények
+## Usage Philosophy
 
-- Debian 11 vagy 12 (tesztelve: bullseye, bookworm)
-- bash, curl, apt, systemd alapértelmezett környezet
-- Internetkapcsolat a csomagok letöltéséhez
+White Venom is **not**:
 
-##  Naplózás
+* a one-click security tool
+* a general-purpose hardening script
+* safe to run blindly on production systems
 
-A script minden lépése naplózva van a következő helyen:
+White Venom **is**:
 
-```
-/var/log/debian-hardening-bootstrap.log
-```
+* a framework for **intentional system lockdown**
+* designed for disposable VMs, labs, hardened hosts
+* meant to be read, understood, and adapted
 
-## Tesztelés
+If you don’t understand what a stage does:
 
-A scriptet LXC konténerben és KVM-alapú virtuális gépen teszteltem. A változtatások nem igényelnek újraindítást, kivéve ha sysctl paraméterek vagy szolgáltatás újrakonfigurálása ezt megköveteli.
+> **Do not run it.**
 
-## Kiterjesztési lehetőségek
+---
 
-- CIS Benchmark megfelelés (baseline szint)
-- Ansible playbook verzió
-- CI/CD pipeline-ba integrálható audit modul
+## Security Model
 
-## Licenc
+* assumes hostile local and remote environments
+* prioritizes kernel and memory protections early
+* favors immutability over convenience
+* accepts reduced usability as a tradeoff
 
-A projekt a mellékelt LICENSE.md fájlban található egyedi EULA feltételei szerint használható. Kereskedelmi felhasználása szigorúan tilos.
+---
 
-**Kereskedelmi célú felhasználás, értékesítés vagy integráció fizetős szolgáltatásba tilos.**
+## Documentation
+
+Additional documentation can be found in:
+
+* `docs/`
+* `debian_skeleton/docs/`
+* `plan/`
+
+Many design decisions are documented **inline**, close to the code.
+
+---
+
+## License
+
+See `LICENSE.md`.
+
+---
+
+## Final Note
+
+White Venom is opinionated.
+
+It reflects the idea that:
+
+> *A system should earn the right to do things.*
+
+If that philosophy resonates with you — you are the target audience.
+
