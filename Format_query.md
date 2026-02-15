@@ -13,3 +13,6 @@ Do not add explanations before or after.
 ## Lifecycle
 ## Security Model
 ## Open Questions
+
+Design the unit for: <név>
+System context: White Venom execution gateway architecture
