@@ -1,86 +1,73 @@
 // © 2026 Beatrix Zselezny. All rights reserved.
-// White-Venom Security Framework
+// White-Venom Engine v2.1-stable (with WC monitoring)
 
 #include <iostream>
 #include <string>
-#include <memory>
 #include <csignal>
 #include <atomic>
 #include <thread>
+#include <chrono>
+#include <iomanip>
 
 #include "core/VenomBus.hpp"
 #include "core/Scheduler.hpp"
+#include "core/SocketProbe.hpp"
 #include "modules/InitSecurityModule.hpp"
 #include "modules/FilesystemModule.hpp"
 
 std::atomic<bool> keepRunning{true};
+rxcpp::composite_subscription engine_lifetime;
 
-void signalHandler(int) {
-    std::cout << "\n[Signal] Leállítási kérelem..." << std::endl;
+void signalHandler(int signum) {
+    std::cout << "\n[Signal] Megszakítás (" << signum << ")..." << std::endl;
     keepRunning = false;
+    if (engine_lifetime.is_subscribed()) engine_lifetime.unsubscribe();
 }
 
 int main(int argc, char* argv[]) {
     bool serviceMode = false;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--service") {
-            serviceMode = true;
-        }
-    }
+    for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--service") serviceMode = true;
 
     std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
 
     Venom::Core::Scheduler scheduler;
     Venom::Core::VenomBus bus;
-    rxcpp::composite_subscription lifetime;
-
-    std::cout << "[Init] White Venom Engine v2.0 (Dual-Bus Reactive)" << std::endl;
-
     Venom::Modules::FilesystemModule fsModule(bus);
-
-    {
-        Venom::Modules::InitSecurityModule initMod;
-        initMod.execute();
-    }
+    Venom::Core::SocketProbe socketProbe(bus, 8888, Venom::Core::LogLevel::SECURITY_ONLY);
 
     try {
+        { Venom::Modules::InitSecurityModule initMod; initMod.execute(); }
         scheduler.start(bus);
-        bus.startReactive(lifetime, scheduler);
+        bus.startReactive(engine_lifetime, scheduler);
         fsModule.performStaticAudit();
 
         if (serviceMode) {
-            std::cout << "[Mode] Service Mode Started. Opening eyes (FS Monitor)..." << std::endl;
+            std::cout << "[Mode] Service Mode: Monitoring FS & Network..." << std::endl;
             fsModule.startMonitoring();
-            
-            while (keepRunning) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                
+            socketProbe.start();
+
+            while (keepRunning && engine_lifetime.is_subscribed()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 auto snap = bus.getTelemetrySnapshot();
-                // A te struktúrád szerinti mezőnevek: total, accepted
+                
+                // MOST MÁR LÁTSZIK A WC (null_routed) IS!
                 std::cout << "\r[Status] Q: " << snap.queue_current 
-                          << " | Total: " << snap.total 
                           << " | OK: " << snap.accepted 
+                          << " | WC: " << snap.null_routed 
+                          << " | Load: " << std::fixed << std::setprecision(2) << snap.current_system_load 
                           << " | Profile: " << (snap.current_profile == SecurityProfile::NORMAL ? "NORMAL" : "HIGH")
                           << std::flush;
             }
-            
+            socketProbe.stop();
             fsModule.stopMonitoring();
-
-        } else {
-            std::cout << "[Mode] One-Shot Execution (Audit only)." << std::endl;
-            bus.pushEvent("ONESHOT", "Audit Complete");
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
-
     } catch (const std::exception& e) {
-        std::cerr << "[CRITICAL] Exception: " << e.what() << std::endl;
-        return 1;
+        std::cerr << "\n[CRITICAL] Engine hiba: " << e.what() << std::endl;
+        engine_lifetime.unsubscribe();
     }
-
-    std::cout << "\n[Shutdown] Cleaning up..." << std::endl;
-    lifetime.unsubscribe();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     scheduler.stop();
-    
+    std::cout << "[Shutdown] White-Venom leállt. 🐱" << std::endl;
     return 0;
 }
