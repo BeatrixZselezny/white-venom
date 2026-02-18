@@ -1,67 +1,64 @@
-# © 2026 Beatrix Zselezny. All rights reserved. [cite: 270]
+# © 2026 Beatrix Zselezny. All rights reserved.
 # White-Venom Security Framework - Hardened Build System
 
 CXX       := g++
+CLANG     := clang
 TARGET    := bin/venom_engine
-SRC_DIR   := src
+BPF_OBJ   := obj/venom_shield.bpf.o
 OBJ_DIR   := obj
+SRC_DIR   := src
 
-INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/modules
+# Include utak (hozzáadva az ebpf alkönyvtár is)
+INC_FLAGS := -Iinclude -Iinclude/utils -Iinclude/core -Iinclude/core/ebpf -Iinclude/modules
 
-# Hardened compile flags [cite: 28, 29, 30]
+# Hardened CXX flags
 CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 -pthread \
              -fstack-protector-strong -fstack-clash-protection \
              -D_FORTIFY_SOURCE=2 -O2 -pipe
 
-# Hardened linker flags [cite: 31, 32]
-LDFLAGS   := -static -Wl,-z,relro,-z,now -pthread
+# eBPF specific flags
+BPF_FLAGS := -O2 -target bpf -g
 
-# Source files - BŐVÍTVE A SOCKETPROBE MODULLAL [cite: 271]
+# Dinamikus linkelés (elhagyjuk a -static-ot), így a rendszer megoldja a függőségeket
+LDFLAGS   := -Wl,-z,relro,-z,now -pthread -lbpf -lelf -lzstd -lz -lpthread -ldl
+
+# Forrásfájlok listája (BpfLoader.cpp hozzáadva)
 SRC := src/main.cpp \
        src/core/VenomBus.cpp \
        src/core/Scheduler.cpp \
        src/core/StreamProbe.cpp \
        src/core/SocketProbe.cpp \
        src/core/NullScheduler.cpp \
+       src/core/ebpf/BpfLoader.cpp \
        src/telemetry/BusTelemetry.cpp \
        src/modules/InitSecurityModule.cpp \
        src/modules/FilesystemModule.cpp
 
-OBJ := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SRC)))
+# Object fájlok generálása
+OBJ := $(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
 
-# Default target
-all: directories $(TARGET)
+all: directories $(BPF_OBJ) $(TARGET)
 
-# Create required directories
 directories:
-	@mkdir -p $(OBJ_DIR)
-	@mkdir -p bin
+	@mkdir -p $(OBJ_DIR)/core/ebpf $(OBJ_DIR)/telemetry $(OBJ_DIR)/modules bin
 
-# Link [cite: 31, 34]
+# eBPF Kernel program fordítása
+$(BPF_OBJ): src/core/ebpf/venom_shield.bpf.c
+	@echo "[CLANG] Compiling eBPF Shield: $<"
+	@$(CLANG) $(BPF_FLAGS) -c $< -o $@
+
+# Fő bináris linkelése
 $(TARGET): $(OBJ)
-	@echo "[LINK] Creating hardened binary: $@"
-	@$(CXX) $(shell find $(OBJ_DIR) -name '*.o') -o $@ $(LDFLAGS)
+	@echo "[LINK] Creating hardened binary with eBPF support: $@"
+	@$(CXX) $(OBJ) -o $@ $(LDFLAGS)
 
-# Compile Rules [cite: 272]
+# C++ fordítási szabály
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@echo "[CXX] Compiling main $<"
+	@echo "[CXX] Compiling: $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/core/%.cpp
-	@echo "[CXX] Compiling core $<"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/telemetry/%.cpp
-	@echo "[CXX] Compiling telemetry $<"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/modules/%.cpp
-	@echo "[CXX] Compiling modules $<"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# Cleanup
 clean:
-	@echo "[CLEAN] Removing build artifacts"
 	@rm -rf $(OBJ_DIR) bin
+	@echo "[CLEAN] Workspace cleared."
 
-.PHONY: all clean directories
+.PHONY: all directories clean
