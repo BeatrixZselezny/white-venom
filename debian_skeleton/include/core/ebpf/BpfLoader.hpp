@@ -3,43 +3,35 @@
 
 #include <string>
 #include <atomic>
+#include <bpf/libbpf.h>
 
 namespace Venom::Core {
+
+    struct BpfStats {
+        uint64_t total_packets;
+        uint64_t dropped_packets;
+    };
 
     class BpfLoader {
     private:
         std::string interfaceName;
         int ifIndex;
         std::atomic<bool> attached;
+        struct bpf_object *obj_ptr;
 
-        // Belső segéd: megkeresi az interfész numerikus azonosítóját (pl. wlo1 -> 3)
         int findInterfaceIndex(const std::string& name);
 
     public:
         explicit BpfLoader();
         ~BpfLoader();
 
-        /**
-         * @brief eBPF bájtkód betöltése és rácsatolása a hálózati kártyára.
-         * @param objPath A lefordított .o fájl helye (pl. "obj/venom_shield.bpf.o")
-         * @param iface Az interfész neve (pl. "wlo1")
-         */
         bool deploy(const std::string& objPath, const std::string& iface);
-
-        /**
-         * @brief Eltávolítja a szűrőt a kernelből.
-         */
         void detach();
-
-        /**
-         * @brief Egy MAC címet fehérlistára tesz a kernel-szintű eBPF map-ben.
-         */
-        bool allowRouterMac(const std::string& mac_str);
-
-        // Lekérdezhető állapot
+        bool blockIP(const std::string& ip_str);
+        BpfStats getStats(); // A Dashboard adatforrása
         bool isActive() const { return attached.load(); }
     };
 
 } // namespace Venom::Core
 
-#endif // BPF_LOADER_HPP
+#endif

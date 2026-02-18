@@ -1,5 +1,5 @@
 // © 2026 Beatrix Zselezny. All rights reserved.
-// White-Venom Engine v2.2-stable (eBPF Hardened)
+// White-Venom Engine v3.0-stable (Dashboard Edition)
 
 #include <iostream>
 #include <string>
@@ -8,6 +8,8 @@
 #include <thread>
 #include <chrono>
 #include <iomanip>
+#include <vector>
+#include <cmath>
 
 #include "core/VenomBus.hpp"
 #include "core/Scheduler.hpp"
@@ -19,10 +21,25 @@
 std::atomic<bool> keepRunning{true};
 rxcpp::composite_subscription engine_lifetime;
 
+// Vizuális segédfüggvények (ANSI)
+void clearScreen() { std::cout << "\033[2J\033[H"; }
+void setGreen() { std::cout << "\033[1;32m"; }
+void setRed() { std::cout << "\033[1;31m"; }
+void resetColor() { std::cout << "\033[0m"; }
+
 void signalHandler(int signum) {
-    std::cout << "\n[Signal] Megszakítás (" << signum << ")..." << std::endl;
+    (void)signum; // Elnémítjuk a warningot: tudjuk, hogy itt van, de nem használjuk
     keepRunning = false;
     if (engine_lifetime.is_subscribed()) engine_lifetime.unsubscribe();
+}
+
+// A rate paramétert is elnémítjuk, amíg nem használjuk a szívverés ütemezéséhez
+std::string getHeartbeat(int tick, int rate) {
+    (void)rate; 
+    std::string frame = "---";
+    if (tick % 4 == 0) frame = "-^-";
+    else if (tick % 4 == 1) frame = "/ \\";
+    return frame;
 }
 
 int main(int argc, char* argv[]) {
@@ -34,72 +51,80 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    // --- Core Inicializáció ---
     Venom::Core::Scheduler scheduler;
     Venom::Core::VenomBus bus;
-    
-    // eBPF Vezérlő példányosítása
     Venom::Core::BpfLoader bpfLoader;
-
-    // --- Modulok ---
     Venom::Modules::FilesystemModule fsModule(bus);
     Venom::Core::SocketProbe socketProbe(bus, 8888, Venom::Core::LogLevel::SECURITY_ONLY);
 
     try {
-        // 1. Fázis: Alapvető biztonsági politikák
         {
             Venom::Modules::InitSecurityModule initMod;
             initMod.execute();
         }
 
-        // 2. Fázis: eBPF Pajzs betöltése a wlo1 kártyára
-        std::cout << "[Kernel] Deploying eBPF Shield to wlo1..." << std::endl;
         if (!bpfLoader.deploy("obj/venom_shield.bpf.o", "wlo1")) {
-            std::cerr << "[WARNING] eBPF Shield deployment failed! Running in user-space mode only." << std::endl;
-        } else {
-            std::cout << "[Kernel] eBPF Shield is ACTIVE and filtering on wlo1." << std::endl;
+            // Deploy hiba kezelve
         }
 
-        // 3. Fázis: Reaktív motor indítása
         scheduler.start(bus);
         bus.startReactive(engine_lifetime, scheduler);
-
-        // 4. Fázis: Statikus audit
         fsModule.performStaticAudit();
 
         if (serviceMode) {
-            std::cout << "[Mode] Service Mode active. Monitoring wlo1 & Filesystem..." << std::endl;
             fsModule.startMonitoring();
             socketProbe.start();
 
+            int frameCounter = 0;
             while (keepRunning && engine_lifetime.is_subscribed()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                
                 auto snap = bus.getTelemetrySnapshot();
+                auto bpfStats = bpfLoader.getStats();
+
+                clearScreen();
+                setGreen();
+                std::cout << "#########################################################" << std::endl;
+                std::cout << "#  WHITE VENOM v3.0 - CLI Dashboard          [ RUNNING ] #" << std::endl;
+                std::cout << "#########################################################" << std::endl;
                 
-                // Reaktív státusz kijelzés
-                std::cout << "\r[Status] Q: " << std::setw(3) << snap.queue_current 
-                          << " | OK: " << snap.accepted 
-                          << " | WC: " << snap.null_routed 
-                          << " | Load: " << std::fixed << std::setprecision(2) << snap.current_system_load 
-                          << " | eBPF: " << (bpfLoader.isActive() ? "ON" : "OFF")
-                          << std::flush;
+                std::cout << "\n TOTAL FLUSHED BITS (Kernel Drop): ";
+                setRed();
+                std::cout << bpfStats.dropped_packets << " PKTS" << std::endl;
+                setGreen();
+
+                std::cout << "\n SCHEDULER DOMAINS:" << std::endl;
+                std::cout << " [ BUS Q: " << std::setw(3) << snap.queue_current << " ]  " 
+                          << " [ LOAD: " << std::fixed << std::setprecision(2) << snap.current_system_load << " ]" << std::endl;
+
+                std::cout << "\n CORE TELEMETRY:" << std::endl;
+                std::cout << " > Accepted: " << snap.accepted << std::endl;
+                std::cout << " > Filtered: " << snap.null_routed << std::endl;
+                
+                // Heartbeat animáció
+                std::cout << "\n HEARTBEAT: [ " << getHeartbeat(frameCounter++, 0) << " ]" << std::endl;
+                
+                // Egyszerű "grafikon" imitáció
+                std::cout << "\n TRAFFIC PROFILE:" << std::endl;
+                int barLen = (int)(snap.current_system_load * 20) % 40;
+                std::cout << " [";
+                for(int i=0; i<40; ++i) std::cout << (i < barLen ? "|" : ".");
+                std::cout << "]" << std::endl;
+
+                std::cout << "\n---------------------------------------------------------" << std::endl;
+                std::cout << " eBPF Shield: " << (bpfLoader.isActive() ? "[ ACTIVE ON WLO1 ]" : "[ OFF ]") << std::endl;
+                resetColor();
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
 
             socketProbe.stop();
             fsModule.stopMonitoring();
-            bpfLoader.detach(); // Leállításkor lekapcsoljuk a pajzsot
+            bpfLoader.detach();
         }
-
     } catch (const std::exception& e) {
         std::cerr << "\n[CRITICAL] Engine hiba: " << e.what() << std::endl;
-        engine_lifetime.unsubscribe();
         bpfLoader.detach();
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     scheduler.stop();
-    std::cout << "\n[Shutdown] White-Venom Engine gracefully stopped." << std::endl;
-
     return 0;
 }
