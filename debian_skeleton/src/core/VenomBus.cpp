@@ -14,6 +14,7 @@ namespace Venom::Core {
 
     VenomBus::VenomBus() {
         telemetry.reset_window();
+        last_filtered_ip = ""; // inicializálás
     }
 
     void VenomBus::pushEvent(const std::string& source, const std::string& data) {
@@ -27,29 +28,29 @@ namespace Venom::Core {
         }
 
         vent_bus.get_subscriber().on_next(VentEvent{source, data});
+
+        // Mentés az utolsó IP-nek (példa, ha source IP)
+        {
+            std::lock_guard<std::mutex> lock(ip_mutex);
+            last_filtered_ip = source;
+        }
     }
 
     void VenomBus::startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler) {
         auto raw_stream = vent_bus.get_observable();
 
-        // Közvetlen feliratkozás a pair-mentes, stabil működésért
         raw_stream
             .subscribe_on(rxcpp::observe_on_new_thread())
             .observe_on(rxcpp::observe_on_new_thread())
             .subscribe(lifetime, [this, &scheduler](VentEvent ev) {
-                // Dinamikus entrópiás küszöb számítása
                 auto meta = telemetry.get_metabolism();
                 double dynamicThreshold = 6.8 * (1.0 / (meta.loadFactor + 0.11));
-                
                 double entropy = StreamProbe::calculateEntropy(ev.payload);
                 
-                // Eldöntjük a sorsát: WC vagy Elfogadva
                 if (entropy > dynamicThreshold) {
-                    // WC (Null-Routing)
                     NullScheduler::absorb(ev);
                     telemetry.null_routed_events++;
                 } else {
-                    // Értékes adat
                     telemetry.accepted_events++;
                 }
                 
@@ -61,6 +62,12 @@ namespace Venom::Core {
 
     TelemetrySnapshot VenomBus::getTelemetrySnapshot() const {
         return telemetry.snapshot();
+    }
+
+    // ===== Hiányzó függvény implementáció =====
+    std::string VenomBus::getLastFilteredIP() const {
+        std::lock_guard<std::mutex> lock(ip_mutex);
+        return last_filtered_ip;
     }
 
 } // namespace Venom::Core

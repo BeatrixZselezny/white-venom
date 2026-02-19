@@ -4,6 +4,7 @@
 #include <bpf/bpf_helpers.h>
 #include <linux/in.h>
 
+// Blacklist tábla az automatikus blokkoláshoz
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
@@ -11,6 +12,7 @@ struct {
     __type(value, __u8);
 } blacklist_map SEC(".maps");
 
+// Statisztikai tábla a Dashboardhoz
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 2);
@@ -37,13 +39,13 @@ int venom_router_guard(struct xdp_md *ctx) {
         struct iphdr *iph = (void *)(eth + 1);
         if ((void *)(iph + 1) > data_end) return XDP_PASS;
 
-        update_stat(0); // Összes csomag (Total)
+        update_stat(0); // Összes vizsgált IP csomag
 
         __u32 src_ip = iph->saddr;
         __u8 *blocked = bpf_map_lookup_elem(&blacklist_map, &src_ip);
         
         if (blocked && *blocked == 1) {
-            update_stat(1); // Eldobott csomag (Flushed)
+            update_stat(1); // Kernel szinten eldobott (Flushed Bit)
             return XDP_DROP;
         }
     }

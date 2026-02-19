@@ -10,10 +10,7 @@
 namespace Venom::Core {
 
 BpfLoader::BpfLoader() : interfaceName("wlo1"), ifIndex(-1), attached(false), obj_ptr(nullptr) {}
-
-BpfLoader::~BpfLoader() {
-    detach();
-}
+BpfLoader::~BpfLoader() { detach(); }
 
 int BpfLoader::findInterfaceIndex(const std::string& name) {
     return if_nametoindex(name.c_str());
@@ -46,6 +43,7 @@ bool BpfLoader::deploy(const std::string& objPath, const std::string& iface) {
     return true;
 }
 
+// A Dashboard adatforrása a kernelből
 BpfStats BpfLoader::getStats() {
     BpfStats stats = {0, 0};
     if (!attached || !obj_ptr) return stats;
@@ -63,8 +61,11 @@ BpfStats BpfLoader::getStats() {
 bool BpfLoader::blockIP(const std::string& ip_str) {
     if (!attached || !obj_ptr) return false;
     uint32_t ip;
-    inet_pton(AF_INET, ip_str.c_str(), &ip);
+    if (inet_pton(AF_INET, ip_str.c_str(), &ip) != 1) return false;
+
     int map_fd = bpf_object__find_map_fd_by_name(obj_ptr, "blacklist_map");
+    if (map_fd < 0) return false;
+
     uint8_t value = 1;
     return bpf_map_update_elem(map_fd, &ip, &value, BPF_ANY) == 0;
 }
