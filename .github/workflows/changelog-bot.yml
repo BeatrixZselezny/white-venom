@@ -1,0 +1,36 @@
+name: Auto Changelog Bot
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  changelog-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get last commit author
+        id: author
+        run: |
+          AUTHOR=$(git log -1 --pretty=format:'%ae')
+          echo "::set-output name=email::$AUTHOR"
+
+      - name: Check CHANGELOG
+        id: check
+        run: |
+          if ! git diff --name-only HEAD~1 HEAD | grep -q "CHANGELOG.md"; then
+            echo "No changelog update"
+            exit 1
+          fi
+
+      - name: Notify author if no changelog update
+        if: failure()
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: 1  # Ha PR, itt a PR szám kell
+          body: |
+            🚨 Hé, <${{ steps.author.outputs.email }}>! 
+            Tőcsé má ki! Nem frissítetted a CHANGELOG.md-t a legutóbbi commit óta! 😎
