@@ -27,22 +27,25 @@ CXXFLAGS  := $(INC_FLAGS) -Wall -Wextra -std=c++20 -pthread \
 # eBPF specific flags
 BPF_FLAGS := -O2 -target bpf -g
 
-# Linker flags
+# Linker flags (Dinamikus linkelés eBPF támogatással)
 LDFLAGS   := -Wl,-z,relro,-z,now -pthread -lbpf -lelf -lzstd -lz -lpthread -ldl
 
 # ------------------------------------------------------------------
-# Források
+# Források (Kibővítve a hiányzó Watchman és Hardening modulokkal)
 # ------------------------------------------------------------------
 SRC := src/main.cpp \
        src/core/VenomBus.cpp \
        src/core/Scheduler.cpp \
        src/core/StreamProbe.cpp \
        src/core/SocketProbe.cpp \
+       src/core/VisualMemory.cpp \
        src/core/NullScheduler.cpp \
+       src/core/RawPacketProbe.cpp \
        src/core/ebpf/BpfLoader.cpp \
        src/telemetry/BusTelemetry.cpp \
        src/modules/InitSecurityModule.cpp \
-       src/modules/FilesystemModule.cpp
+       src/modules/FilesystemModule.cpp \
+       src/utils/HardeningUtils.cpp
 
 OBJ := $(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(SRC))
 
@@ -55,7 +58,7 @@ all: directories $(BPF_OBJ) $(TARGET)
 # Create directories automatically
 # ------------------------------------------------------------------
 directories:
-	@mkdir -p $(OBJ_DIR)/core/ebpf $(OBJ_DIR)/telemetry $(OBJ_DIR)/modules bin
+	@mkdir -p $(OBJ_DIR)/core/ebpf $(OBJ_DIR)/telemetry $(OBJ_DIR)/modules $(OBJ_DIR)/utils bin
 
 # ------------------------------------------------------------------
 # eBPF object compilation
@@ -93,8 +96,7 @@ clean:
 # ------------------------------------------------------------------
 # Phony targets
 # ------------------------------------------------------------------
-.PHONY: all directories clean
-
+.PHONY: all directories clean rebuild backup install ferrari
 
 # ------------------------------------------------------------------
 # Ferrari mode: clean + rebuild + backup + install
@@ -102,12 +104,12 @@ clean:
 
 INSTALL_DIR := /usr/local/bin
 INSTALL_LOG := build/install.log
-BACKUP_DIR := build/backup
+BACKUP_DIR  := build/backup
 
 # Biztonságos rebuild: clean szinkron, utána all párhuzamos
 rebuild:
 	@$(MAKE) clean
-	@$(MAKE) all -j$(nproc)
+	@$(MAKE) all -j$(shell nproc)
 	@echo "[REBUILD] Full rebuild completed."
 
 # Backup binary
@@ -126,4 +128,3 @@ install: $(TARGET)
 # Ferrari mode: mindent egy parancsra
 ferrari: rebuild backup install
 	@echo "[FERRARI] All done. 🏎️💨"
-
