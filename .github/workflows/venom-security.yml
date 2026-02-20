@@ -1,4 +1,4 @@
-name: 🐍 White-Venom Security & Build
+name: White-Venom Security & Build
 
 on:
   push:
@@ -7,15 +7,17 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # 1. C++ Audit (Változatlan)
+
   cpp-sast:
     name: C++ Code Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Cppcheck
         run: sudo apt-get update && sudo apt-get install -y cppcheck
-      - name: Run Cppcheck (warnings allowed)
+
+      - name: Run Cppcheck
         run: |
           cppcheck debian_skeleton/src \
             -I debian_skeleton/include \
@@ -28,30 +30,29 @@ jobs:
             --inline-suppr \
             --verbose || true
 
-  # 2. Shell Script Audit (Változatlan)
   shell-audit:
-    name: ShellCheck (Bash scripts)
+    name: ShellCheck Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run ShellCheck
-        run: shellcheck debian_skeleton/*.sh scripts/*.sh || echo "ShellCheck warnings found"
 
-  # 3. Trivy (Változatlan)
+      - name: Run ShellCheck
+        run: shellcheck debian_skeleton/*.sh scripts/*.sh || true
+
   trivy-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
 
-  # 4. Build Test (JAVÍTVA 🛠️)
+      - uses: aquasecurity/trivy-action@0.20.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+
   build:
     name: Build Test
     runs-on: ubuntu-latest
