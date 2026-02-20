@@ -7,16 +7,18 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # 1. C++ Audit
+  # 1. C++ Audit (nem áll meg style warning miatt)
   cpp-sast:
     name: C++ Code Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Cppcheck
         run: |
           sudo apt-get update
           sudo apt-get install -y cppcheck
+
       - name: Run Cppcheck (warnings allowed)
         run: |
           cppcheck debian_skeleton/src \
@@ -41,13 +43,14 @@ jobs:
           shopt -s nullglob
           shellcheck debian_skeleton/*.sh scripts/*.sh || echo "ShellCheck warnings found"
 
-  # 3. Trivy
+  # 3. Trivy (Biztonsági rések keresése)
   trivy-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@master
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -55,7 +58,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-  # 4. Build Test (Itt volt a hiba!)
+  # 4. Build Test (BPF javítással)
   build:
     name: Build Test
     runs-on: ubuntu-latest
@@ -75,11 +78,12 @@ jobs:
             linux-headers-$(uname -r)
 
       - name: Configure CMake
-        # Az export CFLAGS segít, ha a kódod direktben keresi a bpf/bpf.h-t
+        # Itt kényszerítjük ki az include path-t a fordítónak
         run: |
-          export CFLAGS="-I/usr/include/bpf"
-          export CXXFLAGS="-I/usr/include/bpf"
-          cmake -S . -B build
+          cmake -S . -B build \
+            -DCMAKE_CXX_FLAGS="-I/usr/include/bpf" \
+            -DCMAKE_C_FLAGS="-I/usr/include/bpf" \
+            -DCMAKE_INCLUDE_PATH="/usr/include/bpf"
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build --verbose
