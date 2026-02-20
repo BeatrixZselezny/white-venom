@@ -23,10 +23,18 @@ file(GLOB_RECURSE SKELETON_SOURCES "${SRC_DIR}/*.cpp")
 # --- FORDÍTÁS ---
 add_executable(white-venom ${SKELETON_SOURCES})
 
+
 # --- DEPENDENCIES ---
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 find_package(Threads REQUIRED)
-target_link_libraries(white-venom Threads::Threads)
+
+# Itt adjuk hozzá a bpf és elf könyvtárakat!
+target_link_libraries(white-venom 
+    Threads::Threads
+    bpf
+    elf
+    z
+)
 
 if(UNIX)
     target_link_libraries(white-venom dl)
