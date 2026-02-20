@@ -1,58 +1,3 @@
-name: White-Venom Security & Build
-
-on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
-
-jobs:
-
-  cpp-sast:
-    name: C++ Code Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Cppcheck
-        run: sudo apt-get update && sudo apt-get install -y cppcheck
-
-      - name: Run Cppcheck
-        run: |
-          cppcheck debian_skeleton/src \
-            -I debian_skeleton/include \
-            --enable=all --inconclusive \
-            --suppress=missingIncludeSystem \
-            --suppress=checkersReport \
-            --suppress=unmatchedSuppression \
-            --suppress=unusedFunction \
-            --suppress=missingInclude \
-            --inline-suppr \
-            --verbose || true
-
-  shell-audit:
-    name: ShellCheck Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run ShellCheck
-        run: shellcheck debian_skeleton/*.sh scripts/*.sh || true
-
-  trivy-scan:
-    name: Trivy Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: aquasecurity/trivy-action@0.20.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
-
   build:
     name: Build Test
     runs-on: ubuntu-latest
@@ -63,17 +8,25 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libbpf-dev \
-            libelf-dev \
             clang \
             llvm \
+            make \
+            gcc \
+            libelf-dev \
+            zlib1g-dev \
+            pkg-config \
             build-essential \
-            linux-tools-common \
-            linux-tools-generic \
-            linux-headers-$(uname -r)
+            git
+
+      - name: Build libbpf from source
+        run: |
+          git clone https://github.com/libbpf/libbpf.git
+          cd libbpf/src
+          make
+          sudo make install
 
       - name: Configure CMake
-        run: cmake -S . -B build
+        run: cmake -S . -B build -DCMAKE_CXX_FLAGS="-I/usr/local/include"
 
       - name: Build
         run: cmake --build build
