@@ -7,16 +7,14 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # 1. C++ Audit (nem áll meg style warning miatt)
+  # 1. C++ Audit (Változatlan)
   cpp-sast:
     name: C++ Code Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Cppcheck
-        run: sudo apt-get install -y cppcheck
-
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
       - name: Run Cppcheck (warnings allowed)
         run: |
           cppcheck debian_skeleton/src \
@@ -29,9 +27,8 @@ jobs:
             --suppress=missingInclude \
             --inline-suppr \
             --verbose || true
-        # A "|| true" biztosítja, hogy a job SOSEM lesz piros
 
-  # 2. Shell Script Audit
+  # 2. Shell Script Audit (Változatlan)
   shell-audit:
     name: ShellCheck (Bash scripts)
     runs-on: ubuntu-latest
@@ -40,7 +37,7 @@ jobs:
       - name: Run ShellCheck
         run: shellcheck debian_skeleton/*.sh scripts/*.sh || echo "ShellCheck warnings found"
 
-  # 3. Trivy (Titkok + sérülékenységek)
+  # 3. Trivy (Változatlan)
   trivy-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
@@ -54,12 +51,17 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-  # 4. Build Test (Fordul-e?)
+  # 4. Build Test (JAVÍTVA 🛠️)
   build:
     name: Build Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install BPF Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbpf-dev libelf-dev clang llvm build-essential
 
       - name: Configure CMake
         run: cmake -S . -B build
