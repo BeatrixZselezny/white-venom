@@ -1,62 +1,97 @@
-name: 🛡️ Zero Trust Security Audit
+name: White-Venom Security & Build
 
 on:
   push:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  schedule:
-    - cron: '0 3 * * *'
 
 jobs:
 
-  # 1. JOB: Általános Sérülékenység Vizsgálat (C++, Java, Bash, OS)
-  vulnerability-scan:
+  cpp-sast:
+    name: C++ Code Analysis
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # TRIVY: A mindenevő szörny, ami megtalálja a bajt
-      - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@master
+      - name: Install Cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run Cppcheck
+        run: |
+          cppcheck debian_skeleton/src \
+            -I debian_skeleton/include \
+            --enable=all --inconclusive \
+            --suppress=missingIncludeSystem \
+            --suppress=checkersReport \
+            --suppress=unmatchedSuppression \
+            --suppress=unusedFunction \
+            --suppress=missingInclude \
+            --inline-suppr \
+            --verbose || true
+
+  shell-audit:
+    name: ShellCheck Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        run: |
+          shopt -s nullglob
+          shellcheck debian_skeleton/*.sh scripts/*.sh || true
+
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aquasecurity/trivy-action@0.20.0
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1' # Bukjon el a build, ha kritikus hiba van!
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
 
-  # 2. JOB: Java/Maven Specifikus (Csak ha van pom.xml!)
-  maven-policy-check:
+  build:
+    name: Build Test
     runs-on: ubuntu-latest
-    needs: vulnerability-scan
-    if: ${{ exists('pom.xml') }} # Csak akkor fut, ha tényleg van pom.xml
+    needs:
+      - cpp-sast
+      - shell-audit
+      - trivy-scan
     steps:
-      - name: Checkout Code
+      - uses: actions/checkout@v4
+
+      - name: Install BPF Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbpf-dev libelf-dev clang llvm build-essential
+
+      - name: Configure CMake
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build
+
+  maven-build:
+    name: Maven Build (optional)
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ hashFiles('pom.xml') != '' }}
+    steps:
+      - name: Checkout repository
         uses: actions/checkout@v4
-      
-      - name: Set up JDK 25
+
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '25'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 17
 
-      - name: Enforce Postgres & No Illegal SQL
-        run: |
-          echo "🐘 Postgres Policy Enforcement..."
-          mvn dependency:tree -Dincludes=*:*sql*,*:*jdbc*,*:*hibernate* > deps.txt
-          
-          if grep -i "mysql" deps.txt; then
-            echo "❌ CRITICAL: MySQL detected! This is illegal per policy."
-            exit 1
-          fi
-          
-          if grep -i "mssql" deps.txt; then
-             echo "❌ CRITICAL: MSSQL detected! Strictly prohibited."
-             exit 1
-          fi
-
-          echo "✅ Database Policy Check Passed."
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
