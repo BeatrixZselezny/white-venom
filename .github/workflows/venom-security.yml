@@ -7,50 +7,30 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # 1. C++ Audit (nem áll meg style warning miatt)
   cpp-sast:
     name: C++ Code Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Cppcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Run Cppcheck
+        run: cppcheck debian_skeleton/src -I debian_skeleton/include --enable=all --inconclusive --suppress=missingIncludeSystem --inline-suppr --verbose || true
 
-      - name: Run Cppcheck (warnings allowed)
-        run: |
-          cppcheck debian_skeleton/src \
-            -I debian_skeleton/include \
-            --enable=all --inconclusive \
-            --suppress=missingIncludeSystem \
-            --suppress=checkersReport \
-            --suppress=unmatchedSuppression \
-            --suppress=unusedFunction \
-            --suppress=missingInclude \
-            --inline-suppr \
-            --verbose || true
-
-  # 2. Shell Script Audit
   shell-audit:
     name: ShellCheck (Bash scripts)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run ShellCheck
-        run: |
-          shopt -s nullglob
-          shellcheck debian_skeleton/*.sh scripts/*.sh || echo "ShellCheck warnings found"
+        run: shopt -s nullglob && shellcheck debian_skeleton/*.sh scripts/*.sh || echo "Warnings found"
 
-  # 3. Trivy (Biztonsági rések keresése)
   trivy-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Trivy
-        uses: aquasecurity/trivy-action@master
+      - uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -58,7 +38,6 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-  # 4. Build Test (BPF javítással)
   build:
     name: Build Test
     runs-on: ubuntu-latest
@@ -68,22 +47,22 @@ jobs:
       - name: Install BPF Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libbpf-dev \
-            libelf-dev \
-            clang \
-            llvm \
-            pkg-config \
-            build-essential \
-            linux-headers-$(uname -r)
+          sudo apt-get install -y libbpf-dev libelf-dev clang llvm pkg-config build-essential linux-headers-$(uname -r)
+
+      - name: Fix BPF Header Paths (The "Shut Up" fix)
+        run: |
+          # Ha a kód <bpf/bpf.h>-t keres, de a rendszerben csak /usr/include/bpf.h van, 
+          # vagy fordítva, ez a trükk megoldja:
+          sudo ln -sf /usr/include/bpf /usr/include/bpf/bpf || true
+          # Biztos ami biztos, tegyük elérhetővé a sima include könyvtárban is
+          sudo cp -r /usr/include/bpf/* /usr/include/ 2>/dev/null || true
 
       - name: Configure CMake
-        # Itt kényszerítjük ki az include path-t a fordítónak
         run: |
-          cmake -S . -B build \
-            -DCMAKE_CXX_FLAGS="-I/usr/include/bpf" \
-            -DCMAKE_C_FLAGS="-I/usr/include/bpf" \
-            -DCMAKE_INCLUDE_PATH="/usr/include/bpf"
+          # Kényszerített útvonalak minden lehetséges módon
+          export CPLUS_INCLUDE_PATH="/usr/include:/usr/include/bpf:$CPLUS_INCLUDE_PATH"
+          export C_INCLUDE_PATH="/usr/include:/usr/include/bpf:$C_INCLUDE_PATH"
+          cmake -S . -B build -DCMAKE_CXX_FLAGS="-I/usr/include -I/usr/include/bpf"
 
       - name: Build
         run: cmake --build build --verbose
