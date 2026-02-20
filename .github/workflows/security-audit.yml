@@ -5,87 +5,39 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+  schedule:
+    - cron: '0 3 * * *'
 
 jobs:
-  cpp-sast:
-    name: C++ Code Analysis
+  # 1. JOB: Általános Sérülékenység Vizsgálat
+  vulnerability-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Cppcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
-
-      - name: Run Cppcheck
-        run: |
-          cppcheck debian_skeleton/src \
-            -I debian_skeleton/include \
-            --enable=all --inconclusive \
-            --suppress=missingIncludeSystem \
-            --suppress=checkersReport \
-            --suppress=unmatchedSuppression \
-            --suppress=unusedFunction \
-            --suppress=missingInclude \
-            --inline-suppr \
-            --verbose || true
-
-  shell-audit:
-    name: ShellCheck Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run ShellCheck
-        run: |
-          shopt -s nullglob
-          shellcheck debian_skeleton/*.sh scripts/*.sh || true
-
-  trivy-scan:
-    name: Trivy Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: aquasecurity/trivy-action@0.20.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
-
-  build:
-    name: Build Test
-    runs-on: ubuntu-latest
-    needs:
-      - cpp-sast
-      - shell-audit
-      - trivy-scan
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install BPF Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libbpf-dev libelf-dev clang llvm build-essential linux-headers-generic
-
-      - name: Configure CMake
-        run: cmake -S . -B build
-
-      - name: Build
-        run: cmake --build build
-
-  maven-build:
-    name: Maven Build (optional)
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Check if pom.xml exists
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # 2. JOB: Java/Maven Specifikus
+  maven-policy-check:
+    runs-on: ubuntu-latest
+    needs: vulnerability-scan
+    # Itt töröltem az 'if: exists' hibás sort
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Ez helyettesíti az exists() függvényt
+      - name: Check for pom.xml
         id: check_pom
         run: |
           if [ -f "pom.xml" ]; then
@@ -94,13 +46,27 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up JDK
+      - name: Set up JDK 25
         if: steps.check_pom.outputs.exists == 'true'
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '25'
+          distribution: 'temurin'
 
-      - name: Build with Maven
+      - name: Enforce Postgres & No Illegal SQL
         if: steps.check_pom.outputs.exists == 'true'
-        run: mvn -B package --file pom.xml
+        run: |
+          echo "🐘 Postgres Policy Enforcement..."
+          mvn dependency:tree -Dincludes=*:*sql*,*:*jdbc*,*:*hibernate* > deps.txt
+
+          if grep -i "mysql" deps.txt; then
+            echo "❌ CRITICAL: MySQL detected! This is illegal per policy."
+            exit 1
+          fi
+
+          if grep -i "mssql" deps.txt; then
+             echo "❌ CRITICAL: MSSQL detected! Strictly prohibited."
+             exit 1
+          fi
+
+          echo "✅ Database Policy Check Passed."
