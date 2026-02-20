@@ -11,6 +11,7 @@
 #include "core/Scheduler.hpp"
 #include "core/SocketProbe.hpp"
 #include "core/ebpf/BpfLoader.hpp"
+#include "core/VisualMemory.hpp"
 #include "modules/InitSecurityModule.hpp"
 #include "modules/FilesystemModule.hpp"
 
@@ -48,21 +49,22 @@ int main(int argc, char* argv[]) {
     Venom::Core::Scheduler scheduler;
     Venom::Core::VenomBus bus;
     Venom::Core::BpfLoader bpfLoader;
+    Venom::Core::VisualMemory vMem; 
     Venom::Modules::FilesystemModule fsModule(bus);
     Venom::Core::SocketProbe socketProbe(bus, 8888, Venom::Core::LogLevel::SECURITY_ONLY);
 
     try {
         { Venom::Modules::InitSecurityModule initMod; initMod.execute(); }
-        bpfLoader.deploy("obj/venom_shield.bpf.o", "wlo1");
+        
+        // JAVÍTÁS: A Makefile az obj/core/ebpf/ mappába fordít. Ide kell mutatni.
+        bpfLoader.deploy("obj/core/ebpf/venom_shield.bpf.o", "wlo1");
 
-        scheduler.start(bus);
+        // Összekötjük a rendszert: a Scheduler megkapja a buszt, a loadert és a memóriát
+        scheduler.start(bus, bpfLoader, vMem);
         bus.startReactive(engine_lifetime, scheduler);
-        fsModule.performStaticAudit();
 
         if (serviceMode) {
-            fsModule.startMonitoring();
             socketProbe.start();
-
             int frameCounter = 0;
             uint64_t last_filtered = 0;
 
@@ -70,13 +72,9 @@ int main(int argc, char* argv[]) {
                 auto snap = bus.getTelemetrySnapshot();
                 auto bpfStats = bpfLoader.getStats();
 
-                // AUTOMATIZÁLT RAGADOZÓ LOGIKA:
-                // Ha a Filtered (WC) nő, az entrópia/bináris hiba miatt történt.
-                // Ha valaki túl sokat próbálkozik, a busz átadja a kernelnek.
                 if (snap.null_routed > last_filtered) {
                     std::string bad_ip = bus.getLastFilteredIP();
                     if (!bad_ip.empty()) {
-                        // Azonnali kernel blokkolás a viselkedés alapján
                         bpfLoader.blockIP(bad_ip);
                     }
                     last_filtered = snap.null_routed;
@@ -99,13 +97,8 @@ int main(int argc, char* argv[]) {
                 
                 std::cout << "\n HEARTBEAT: [ " << getHeartbeat(frameCounter++, 0) << " ]" << std::endl;
                 
-                std::cout << "\n TRAFFIC PROFILE [LOAD: " << snap.current_system_load << "]" << std::endl;
-                int barLen = (int)(snap.current_system_load * 20) % 40;
-                std::cout << " [";
-                for(int i=0; i<40; ++i) std::cout << (i < barLen ? "|" : ".");
-                std::cout << "]" << std::endl;
-
                 std::cout << "\n---------------------------------------------------------" << std::endl;
+                // Itt a dashboard fogja visszajelezni, ha a deploy sikeres volt
                 std::cout << " eBPF Shield: " << (bpfLoader.isActive() ? "[ ACTIVE ON WLO1 ]" : "[ OFF ]") << std::endl;
                 resetColor();
 
@@ -113,7 +106,6 @@ int main(int argc, char* argv[]) {
             }
 
             socketProbe.stop();
-            fsModule.stopMonitoring();
             bpfLoader.detach();
         }
     } catch (const std::exception& e) {

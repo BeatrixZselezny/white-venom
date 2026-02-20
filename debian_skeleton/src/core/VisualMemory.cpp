@@ -1,4 +1,5 @@
 #include "core/VisualMemory.hpp"
+#include <arpa/inet.h> // IP konverzióhoz
 
 namespace Venom::Core {
 
@@ -19,12 +20,24 @@ size_t VisualMemory::hash2(const std::string& key) const {
 }
 
 void VisualMemory::mark_as_wanted(const std::string& ip) {
+    // 1. Bloom-filter jelölés (Gyors kereséshez)
     bit_array[hash1(ip)].store(true, std::memory_order_release);
     bit_array[hash2(ip)].store(true, std::memory_order_release);
     
-    // Biztonságos számláló növelés
-    std::lock_guard<std::mutex> lock(strike_mutex);
-    strike_count[ip]++;
+    uint32_t current_strikes = 0;
+    {
+        std::lock_guard<std::mutex> lock(strike_mutex);
+        current_strikes = ++strike_count[ip];
+    }
+
+    // 2. Összedrótozás: Ha eléri a küszöböt, küldjük a kernelnek (eBPF)
+    if (current_strikes >= 3 && on_kernel_block_request) {
+        struct in_addr addr;
+        if (inet_pton(AF_INET, ip.c_str(), &addr) == 1) {
+            // Itt repül az IP a kernel feketelistájába!
+            on_kernel_block_request(addr.s_addr);
+        }
+    }
 }
 
 bool VisualMemory::is_on_wanted_list(const std::string& ip) const {
@@ -45,4 +58,4 @@ void VisualMemory::clear_memory() {
     strike_count.clear();
 }
 
-}
+} // namespace Venom::Core

@@ -1,25 +1,28 @@
-#ifndef BPF_LOADER_HPP
-#define BPF_LOADER_HPP
+// © 2026 Beatrix Zselezny. All rights reserved.
+// White-Venom Security Framework
+
+#ifndef BPFLOADER_HPP
+#define BPFLOADER_HPP
 
 #include <string>
 #include <atomic>
-#include <bpf/libbpf.h>
+#include <vector>
+
+// Forward declaration a libbpf-nek
+struct bpf_object;
+struct bpf_link;
 
 namespace Venom::Core {
 
     struct BpfStats {
-        uint64_t total_packets;
         uint64_t dropped_packets;
     };
 
     class BpfLoader {
     private:
-        std::string interfaceName;
-        int ifIndex;
+        struct bpf_object* obj;
+        struct bpf_link* link;      // JAVÍTÁS: Tárolni kell a linket, különben a 6.x kernel lecsatolja
         std::atomic<bool> attached;
-        struct bpf_object *obj_ptr;
-
-        int findInterfaceIndex(const std::string& name);
 
     public:
         explicit BpfLoader();
@@ -28,10 +31,12 @@ namespace Venom::Core {
         bool deploy(const std::string& objPath, const std::string& iface);
         void detach();
         bool blockIP(const std::string& ip_str);
-        BpfStats getStats(); // A Dashboard adatforrása
+        
+        int get_map_fd(const std::string& map_name);
+        BpfStats getStats();
+        
         bool isActive() const { return attached.load(); }
     };
-
-} // namespace Venom::Core
+}
 
 #endif
