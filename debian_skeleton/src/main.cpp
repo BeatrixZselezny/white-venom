@@ -9,6 +9,7 @@
 #include <regex>
 #include <fstream>
 #include <filesystem>
+#include <vector>
 
 #include "core/VenomBus.hpp"
 #include "core/Scheduler.hpp"
@@ -23,10 +24,27 @@ namespace fs = std::filesystem;
 std::atomic<bool> keepRunning{true};
 rxcpp::composite_subscription engine_lifetime;
 
+// --- BLACK HAT DESIGN UTILS ---
 void clearScreen() { std::cout << "\033[2J\033[H"; }
-void setGreen() { std::cout << "\033[1;32m"; }
-void setRed() { std::cout << "\033[1;31m"; }
+void neonGreen() { std::cout << "\033[38;5;82m"; }
+void matrixRed() { std::cout << "\033[38;5;196m"; }
+void stealthGray() { std::cout << "\033[38;5;240m"; }
+void cyberCyan() { std::cout << "\033[38;5;51m"; }
+void boldWhite() { std::cout << "\033[1;37m"; }
 void resetColor() { std::cout << "\033[0m"; }
+
+void drawHeader() {
+    neonGreen();
+    std::cout << "  __      __.__    .__  __             ____   ____                             " << std::endl;
+    std::cout << " /  \\    /  \\  |__ |__|/  |_  ____     \\   \\ /   /____   ____   ____   _____   " << std::endl;
+    std::cout << " \\   \\/\\/   /  |  \\|  \\   __\\/ __ \\     \\   Y   // __ \\ /    \\ /  _ \\ /     \\  " << std::endl;
+    std::cout << "  \\        /|   Y  \\  ||  | \\  ___/      \\     /\\  ___/|   |  (  <_> )  Y Y  \\ " << std::endl;
+    std::cout << "   \\__/\\  / |___|  /__||__|  \\___  >      \\___/  \\___  >___|  /\\____/|__|_|  / " << std::endl;
+    std::cout << "        \\/       \\/              \\/                  \\/     \\/             \\/  " << std::endl;
+    stealthGray();
+    std::cout << " [ STATUS: STEALTH ] [ INTERFACE: WLO1 ] [ KERNEL-SPACE SHIELD ACTIVE ] " << std::endl;
+    resetColor();
+}
 
 void signalHandler(int signum) {
     (void)signum;
@@ -51,14 +69,14 @@ void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
     }
 
     std::string mac_input;
-    setGreen();
-    std::cout << "\n[?] Kérem a Router MAC címét (XX:XX:XX:XX:XX:XX): ";
+    neonGreen();
+    std::cout << "\n[?] ENTER TRUSTED MAC (XX:XX:XX:XX:XX:XX): ";
     resetColor();
     std::cin >> mac_input;
 
     if (!isValidMac(mac_input)) {
-        setRed();
-        std::cerr << "[!] BIZTONSÁGI RIASZTÁS: Érvénytelen MAC formátum!" << std::endl;
+        matrixRed();
+        std::cerr << "[!] SECURITY ALERT: INVALID MAC FORMAT DETECTED!" << std::endl;
         resetColor();
         return;
     }
@@ -69,21 +87,22 @@ void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
             ofs << mac_input;
             ofs.close();
             fs::permissions(configFile, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
-            std::cout << "[+] Router MAC rögzítve." << std::endl;
+            cyberCyan();
+            std::cout << "[+] IDENTITY ANCHORED." << std::endl;
+            resetColor();
         }
     } catch (const std::exception& e) {
-        std::cerr << "[!] Mentési hiba: " << e.what() << std::endl;
+        matrixRed();
+        std::cerr << "[!] PERSISTENCE ERROR: " << e.what() << std::endl;
+        resetColor();
     }
 
     bpfLoader.setRouterMAC(mac_input);
 }
 
-std::string getHeartbeat(int tick, int rate) {
-    (void)rate;
-    std::string frame = "---";
-    if (tick % 4 == 0) frame = "-^-";
-    else if (tick % 4 == 1) frame = "/ \\";
-    return frame;
+std::string getHeartbeat(int tick) {
+    std::vector<std::string> frames = {"[ - ]", "[ ^ ]", "[ - ]", "[ v ]"};
+    return frames[tick % 4];
 }
 
 int main(int argc, char* argv[]) {
@@ -104,11 +123,15 @@ int main(int argc, char* argv[]) {
 
     try {
         { Venom::Modules::InitSecurityModule initMod; initMod.execute(); }
+        
+        clearScreen();
+        drawHeader();
         secureSetupRouter(bpfLoader);
         
-        // Csatlakozás a wlo1 interfészhez
         if (!bpfLoader.deploy("obj/core/ebpf/venom_shield.bpf.o", "wlo1")) {
-            std::cerr << "[!] BPF Deployment sikertelen!" << std::endl;
+            matrixRed();
+            std::cerr << "[!] BPF DEPLOYMENT FAILED - KERNEL REJECTED HOOK!" << std::endl;
+            resetColor();
         }
 
         scheduler.start(bus, bpfLoader, vMem);
@@ -132,26 +155,32 @@ int main(int argc, char* argv[]) {
                 }
 
                 clearScreen();
-                setGreen();
-                std::cout << "#########################################################" << std::endl;
-                std::cout << "#  WHITE VENOM v3.0 - CLI Dashboard [TRIXIE EDITION]    #" << std::endl;
-                std::cout << "#########################################################" << std::endl;
+                drawHeader();
                 
-                std::cout << "\n TOTAL FLUSHED BITS (Kernel Drop): ";
-                setRed();
+                std::cout << "\n 💀 "; matrixRed();
+                std::cout << "TOTAL KERNEL DROPS: ";
+                boldWhite();
                 std::cout << bpfStats.dropped_packets << " PKTS" << std::endl;
-                setGreen();
-
-                std::cout << "\n CORE TELEMETRY:" << std::endl;
-                std::cout << " > Accepted: " << snap.accepted << std::endl;
-                std::cout << " > Filtered (WC): " << snap.null_routed << std::endl;
-                
-                std::cout << "\n HEARTBEAT: [ " << getHeartbeat(frameCounter++, 0) << " ]" << std::endl;
-                std::cout << "\n---------------------------------------------------------" << std::endl;
-                std::cout << " eBPF Shield: " << (bpfLoader.isActive() ? "[ ACTIVE ON WLO1 ]" : "[ OFF ]") << std::endl;
                 resetColor();
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                std::cout << "\n 📡 "; cyberCyan();
+                std::cout << "CORE TELEMETRY STREAM:" << std::endl;
+                stealthGray();
+                std::cout << "  > ACCEPTED_NODES: "; neonGreen(); std::cout << snap.accepted << std::endl;
+                stealthGray();
+                std::cout << "  > FILTERED_ENTRY: "; matrixRed(); std::cout << snap.null_routed << std::endl;
+                resetColor();
+                
+                std::cout << "\n 💓 HEARTBEAT: "; neonGreen(); 
+                std::cout << getHeartbeat(frameCounter++) << std::endl;
+                resetColor();
+
+                std::cout << "\n" << std::string(60, '-') << std::endl;
+                stealthGray();
+                std::cout << " [ ENGINE LULLED IN KERNEL SPACE - " << (bpfLoader.isActive() ? "PROTECTED" : "EXPOSED") << " ]" << std::endl;
+                resetColor();
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
 
             socketProbe.stop();
