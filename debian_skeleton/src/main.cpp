@@ -59,16 +59,30 @@ bool isValidMac(const std::string& mac) {
     return std::regex_match(mac, pattern);
 }
 
+// ÚJ, PERMANENS LOGIKA: Megjegyzi a MAC-et bootolás után is
 void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
     const std::string configPath = "/etc/venom";
     const std::string configFile = configPath + "/router.identity";
+    std::string mac_input;
 
+    // 1. Próbáljuk beolvasni a létező fájlt
+    if (fs::exists(configFile)) {
+        std::ifstream ifs(configFile);
+        if (ifs >> mac_input && isValidMac(mac_input)) {
+            cyberCyan();
+            std::cout << "[+] AUTO-LOADED IDENTITY: " << mac_input << std::endl;
+            resetColor();
+            bpfLoader.setRouterMAC(mac_input);
+            return; 
+        }
+    }
+
+    // 2. Ha nincs meg, vagy hibás, csak akkor kérünk újat
     if (!fs::exists(configPath)) {
         fs::create_directories(configPath);
         fs::permissions(configPath, fs::perms::owner_all, fs::perm_options::replace);
     }
 
-    std::string mac_input;
     neonGreen();
     std::cout << "\n[?] ENTER TRUSTED MAC (XX:XX:XX:XX:XX:XX): ";
     resetColor();
@@ -76,7 +90,7 @@ void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
 
     if (!isValidMac(mac_input)) {
         matrixRed();
-        std::cerr << "[!] SECURITY ALERT: INVALID MAC FORMAT DETECTED!" << std::endl;
+        std::cerr << "[!] SECURITY ALERT: INVALID MAC FORMAT!" << std::endl;
         resetColor();
         return;
     }
@@ -130,7 +144,7 @@ int main(int argc, char* argv[]) {
         
         if (!bpfLoader.deploy("obj/core/ebpf/venom_shield.bpf.o", "wlo1")) {
             matrixRed();
-            std::cerr << "[!] BPF DEPLOYMENT FAILED - KERNEL REJECTED HOOK!" << std::endl;
+            std::cerr << "[!] BPF DEPLOYMENT FAILED!" << std::endl;
             resetColor();
         }
 
