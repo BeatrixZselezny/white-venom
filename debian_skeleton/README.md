@@ -42,3 +42,4 @@ sudo ./bin/venom_engine --dry-run
 
 ---
 © 2026 Beatrix Zselezny. All rights reserved.
+# White-Venom: Protected by 2835+ drops
