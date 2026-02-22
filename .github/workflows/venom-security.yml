@@ -1,5 +1,3 @@
-# .github/workflows/venom-security.yml
-
 name: 🐍 White-Venom Ferrari Native Build
 
 on:
@@ -15,17 +13,27 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: High-Performance Build
+      - name: Debug & Build
         run: |
-          echo "Building on $(nproc) cores..."
-          # A te Ferrari-d minden erejét bevetjük
-          mkdir -p build
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel $(nproc)
+          cd debian_skeleton
+          echo "Build indítása itt: $(pwd)"
+          
+          # Ellenőrizzük a szerszámokat
+          clang --version || echo "Clang hiányzik!"
+          llc --version || echo "LLC hiányzik!"
+          
+          # Futtassuk a make-et, és irányítsuk ki a hibát
+          make clean
+          make -j$(nproc) 2>&1 | tee build_error.log
+          
+          # Ha nem jött létre a bináris, dobjuk el a jobot, de tartsuk meg a logot
+          if [ ! -f bin/venom_engine ]; then
+            echo "--- FORDÍTÁSI HIBA NAPLÓ ---"
+            cat build_error.log
+            exit 1
+          fi
 
       - name: BPF & Kernel Check
+        if: success()
         run: |
-          echo "Validating Kernel environment..."
-          # Itt már tudsz olyanokat, amiket a felhőben soha
           ls /sys/kernel/btf/vmlinux && echo "BTF is available!"
-          bpftool feature probe || echo "Checking BPF capabilities..."
