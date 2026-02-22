@@ -10,18 +10,18 @@
 #include <mutex>
 #include "rxcpp/rx.hpp"
 
-// Alapvető típusok és szondák
 #include "core/StreamProbe.hpp"
 #include "telemetry/BusTelemetry.hpp"
 #include "TimeCubeTypes.hpp"
 
 namespace Venom::Core {
 
-    class Scheduler; // Forward declaration
+    class Scheduler;
 
     struct VentEvent {
         std::string source;
         std::string payload;
+        bool isArp; // Új: ARP-specifikus jelző
     };
 
     struct CortexCommand {
@@ -43,12 +43,11 @@ namespace Venom::Core {
     public:
         VenomBus();
         
-        void pushEvent(const std::string& source, const std::string& data);
+        // Kibővített pushEvent az ARP támogatáshoz
+        void pushEvent(const std::string& source, const std::string& data, bool isArp = false);
         void startReactive(rxcpp::composite_subscription& lifetime, const Scheduler& scheduler);
 
         [[nodiscard]] TelemetrySnapshot getTelemetrySnapshot() const;
-
-        // Thread-safe getter a hiányzó függvényhez
         [[nodiscard]] std::string getLastFilteredIP() const;
     };
 }

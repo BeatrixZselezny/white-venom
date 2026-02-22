@@ -6,6 +6,9 @@
 #include <chrono>
 #include <iomanip>
 #include <map>
+#include <regex>
+#include <fstream>
+#include <filesystem>
 
 #include "core/VenomBus.hpp"
 #include "core/Scheduler.hpp"
@@ -14,6 +17,8 @@
 #include "core/VisualMemory.hpp"
 #include "modules/InitSecurityModule.hpp"
 #include "modules/FilesystemModule.hpp"
+
+namespace fs = std::filesystem;
 
 std::atomic<bool> keepRunning{true};
 rxcpp::composite_subscription engine_lifetime;
@@ -26,7 +31,51 @@ void resetColor() { std::cout << "\033[0m"; }
 void signalHandler(int signum) {
     (void)signum;
     keepRunning = false;
-    if (engine_lifetime.is_subscribed()) engine_lifetime.unsubscribe();
+    if (engine_lifetime.is_subscribed()) {
+        engine_lifetime.unsubscribe();
+    }
+}
+
+bool isValidMac(const std::string& mac) {
+    const std::regex pattern("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$");
+    return std::regex_match(mac, pattern);
+}
+
+void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
+    const std::string configPath = "/etc/venom";
+    const std::string configFile = configPath + "/router.identity";
+
+    if (!fs::exists(configPath)) {
+        fs::create_directories(configPath);
+        fs::permissions(configPath, fs::perms::owner_all, fs::perm_options::replace);
+    }
+
+    std::string mac_input;
+    setGreen();
+    std::cout << "\n[?] Kérem a Router MAC címét (XX:XX:XX:XX:XX:XX): ";
+    resetColor();
+    std::cin >> mac_input;
+
+    if (!isValidMac(mac_input)) {
+        setRed();
+        std::cerr << "[!] BIZTONSÁGI RIASZTÁS: Érvénytelen MAC formátum!" << std::endl;
+        resetColor();
+        return;
+    }
+
+    try {
+        std::ofstream ofs(configFile, std::ios::trunc);
+        if (ofs.is_open()) {
+            ofs << mac_input;
+            ofs.close();
+            fs::permissions(configFile, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+            std::cout << "[+] Router MAC rögzítve." << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[!] Mentési hiba: " << e.what() << std::endl;
+    }
+
+    bpfLoader.setRouterMAC(mac_input);
 }
 
 std::string getHeartbeat(int tick, int rate) {
@@ -55,11 +104,13 @@ int main(int argc, char* argv[]) {
 
     try {
         { Venom::Modules::InitSecurityModule initMod; initMod.execute(); }
+        secureSetupRouter(bpfLoader);
         
-        // JAVÍTÁS: A Makefile az obj/core/ebpf/ mappába fordít. Ide kell mutatni.
-        bpfLoader.deploy("obj/core/ebpf/venom_shield.bpf.o", "wlo1");
+        // Csatlakozás a wlo1 interfészhez
+        if (!bpfLoader.deploy("obj/core/ebpf/venom_shield.bpf.o", "wlo1")) {
+            std::cerr << "[!] BPF Deployment sikertelen!" << std::endl;
+        }
 
-        // Összekötjük a rendszert: a Scheduler megkapja a buszt, a loadert és a memóriát
         scheduler.start(bus, bpfLoader, vMem);
         bus.startReactive(engine_lifetime, scheduler);
 
@@ -83,7 +134,7 @@ int main(int argc, char* argv[]) {
                 clearScreen();
                 setGreen();
                 std::cout << "#########################################################" << std::endl;
-                std::cout << "#  WHITE VENOM v3.0 - CLI Dashboard          [ RUNNING ] #" << std::endl;
+                std::cout << "#  WHITE VENOM v3.0 - CLI Dashboard [TRIXIE EDITION]    #" << std::endl;
                 std::cout << "#########################################################" << std::endl;
                 
                 std::cout << "\n TOTAL FLUSHED BITS (Kernel Drop): ";
@@ -96,9 +147,7 @@ int main(int argc, char* argv[]) {
                 std::cout << " > Filtered (WC): " << snap.null_routed << std::endl;
                 
                 std::cout << "\n HEARTBEAT: [ " << getHeartbeat(frameCounter++, 0) << " ]" << std::endl;
-                
                 std::cout << "\n---------------------------------------------------------" << std::endl;
-                // Itt a dashboard fogja visszajelezni, ha a deploy sikeres volt
                 std::cout << " eBPF Shield: " << (bpfLoader.isActive() ? "[ ACTIVE ON WLO1 ]" : "[ OFF ]") << std::endl;
                 resetColor();
 

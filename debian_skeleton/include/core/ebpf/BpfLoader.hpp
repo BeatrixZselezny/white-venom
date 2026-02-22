@@ -7,6 +7,7 @@
 #include <string>
 #include <atomic>
 #include <vector>
+#include <cstdint>
 
 // Forward declaration a libbpf-nek
 struct bpf_object;
@@ -18,10 +19,16 @@ namespace Venom::Core {
         uint64_t dropped_packets;
     };
 
+    // A venom_ebpf_common.h-val szinkronizált struktúra
+    struct router_identity {
+        unsigned char mac[6];
+        uint32_t trust_level;
+    };
+
     class BpfLoader {
     private:
         struct bpf_object* obj;
-        struct bpf_link* link;      // JAVÍTÁS: Tárolni kell a linket, különben a 6.x kernel lecsatolja
+        struct bpf_link* link;
         std::atomic<bool> attached;
 
     public:
@@ -30,8 +37,11 @@ namespace Venom::Core {
 
         bool deploy(const std::string& objPath, const std::string& iface);
         void detach();
-        bool blockIP(const std::string& ip_str);
         
+        // Injekció-mentes MAC beállítás (SafeExecutor logika)
+        bool setRouterMAC(const std::string& mac_str);
+        
+        bool blockIP(const std::string& ip_str);
         int get_map_fd(const std::string& map_name);
         BpfStats getStats();
         
