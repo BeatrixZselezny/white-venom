@@ -1,0 +1,32 @@
+# 🐍 White-Venom Framework - Neural Backbone Jelentés v2.7
+
+## 🎯 Stratégiai Összegzés: A Reaktív Idegrendszer
+A White-Venom v2.7-es verziója a VenomBus beépítésével vált teljes biológiai-cyber hibriddé. A rendszer már nem csak érzékel és dönt, hanem egy aszinkron, önszabályozó "gerincvelőn" keresztül koordinálja a válaszreakciókat.
+
+---
+
+## 🧬 A VenomBus Működése (Reaktív Gerinc)
+
+### 1. Dinamikus Metabolikus Szűrés
+* **Forrás**: `VenomBus.cpp`
+* **Mechanizmus**: A busz nem csak szállítja az adatot, hanem a `SystemMetabolism` aktuális értékei alapján folyamatosan újraszámolja a befogadási küszöböt.
+* **Trixie-Sync (200ms)**: A `window_with_time(std::chrono::milliseconds(200))` operátor biztosítja a determinisztikus lüktetést és a Dashboard stabil frissítését.
+
+### 2. Esemény-Útválasztás és "Ventiláció"
+* **Befogadás**: A `pushEvent` minden ingert (pl. `NET_SOCKET`, `ARP`) a `vent_bus`-ra továbbít.
+* **Elnyelés**: Ha az adat entrópiája meghaladja a dinamikus küszöböt, a `NullScheduler::absorb` csendben megsemmisíti a csomagot.
+* **Öntudat**: A busz folyamatosan frissíti a `BusTelemetry`-t (total, accepted, null_routed counters), így a rendszer "tudatában van" saját állapotának.
+
+### 3. Strukturált Kommunikáció
+* **VentEvent**: Nyers hálózati impulzusok és ARP jelzések.
+* **CortexCommand**: A központi döntéshozó modulok utasításai a perifériák felé.
+
+---
+
+## 📊 Rendszer-Fiziológiai Állapot
+* **Gerinc**: RxCpp alapú aszinkron adatfolyam (`rxcpp::subjects::subject`).
+* **Vérnyomás-szabályozás**: 1000 esemény feletti sorhossz esetén automatikus kényszerített elnyelés (Drop-to-Null).
+* **Memória-híd**: A `last_filtered_ip` tárolása lehetővé teszi a vizuális visszacsatolást anélkül, hogy megakasztaná a feldolgozást.
+
+## 🛠️ Következtetés
+A White-Venom már nem egy szoftverkomponensek gyűjteménye, hanem egy **autonóm organizmus**. A VenomBus biztosítja, hogy a "Kaszás" (eBPF), az "Agy" (Scheduler) és az "Érzékszervek" (Probes) egyetlen, összehangolt lüktetésben működjenek.
