@@ -1,0 +1,425 @@
+commit 718a345899681bbab05593309d173ae6f27ae5ce
+Author: Beatrix Zselezny <cattybaby75@gmail.com>
+Date:   Wed Feb 18 23:51:03 2026 +0100
+
+    csináltunk cli-t a kígyócskának
+
+diff --git a/debian_skeleton/include/core/ebpf/BpfLoader.hpp b/debian_skeleton/include/core/ebpf/BpfLoader.hpp
+index 60d6448..cd7eae8 100644
+--- a/debian_skeleton/include/core/ebpf/BpfLoader.hpp
++++ b/debian_skeleton/include/core/ebpf/BpfLoader.hpp
+@@ -3,43 +3,35 @@
+ 
+ #include <string>
+ #include <atomic>
++#include <bpf/libbpf.h>
+ 
+ namespace Venom::Core {
+ 
++    struct BpfStats {
++        uint64_t total_packets;
++        uint64_t dropped_packets;
++    };
++
+     class BpfLoader {
+     private:
+         std::string interfaceName;
+         int ifIndex;
+         std::atomic<bool> attached;
++        struct bpf_object *obj_ptr;
+ 
+-        // Belső segéd: megkeresi az interfész numerikus azonosítóját (pl. wlo1 -> 3)
+         int findInterfaceIndex(const std::string& name);
+ 
+     public:
+         explicit BpfLoader();
+         ~BpfLoader();
+ 
+-        /**
+-         * @brief eBPF bájtkód betöltése és rácsatolása a hálózati kártyára.
+-         * @param objPath A lefordított .o fájl helye (pl. "obj/venom_shield.bpf.o")
+-         * @param iface Az interfész neve (pl. "wlo1")
+-         */
+         bool deploy(const std::string& objPath, const std::string& iface);
+-
+-        /**
+-         * @brief Eltávolítja a szűrőt a kernelből.
+-         */
+         void detach();
+-
+-        /**
+-         * @brief Egy MAC címet fehérlistára tesz a kernel-szintű eBPF map-ben.
+-         */
+-        bool allowRouterMac(const std::string& mac_str);
+-
+-        // Lekérdezhető állapot
++        bool blockIP(const std::string& ip_str);
++        BpfStats getStats(); // A Dashboard adatforrása
+         bool isActive() const { return attached.load(); }
+     };
+ 
+ } // namespace Venom::Core
+ 
+-#endif // BPF_LOADER_HPP
++#endif
+diff --git a/debian_skeleton/src/core/ebpf/BpfLoader.cpp b/debian_skeleton/src/core/ebpf/BpfLoader.cpp
+index 04b2878..be7c42f 100644
+--- a/debian_skeleton/src/core/ebpf/BpfLoader.cpp
++++ b/debian_skeleton/src/core/ebpf/BpfLoader.cpp
+@@ -5,10 +5,11 @@
+ #include <bpf/libbpf.h>
+ #include <bpf/bpf.h>
+ #include <unistd.h>
++#include <arpa/inet.h>
+ 
+ namespace Venom::Core {
+ 
+-BpfLoader::BpfLoader() : interfaceName("wlo1"), ifIndex(-1), attached(false) {}
++BpfLoader::BpfLoader() : interfaceName("wlo1"), ifIndex(-1), attached(false), obj_ptr(nullptr) {}
+ 
+ BpfLoader::~BpfLoader() {
+     detach();
+@@ -21,62 +22,60 @@ int BpfLoader::findInterfaceIndex(const std::string& name) {
+ bool BpfLoader::deploy(const std::string& objPath, const std::string& iface) {
+     interfaceName = iface;
+     ifIndex = findInterfaceIndex(interfaceName);
+-    
+-    if (ifIndex == 0) {
+-        std::cerr << "[BPF] Hiba: Interfész nem található: " << interfaceName << std::endl;
+-        return false;
+-    }
+-
+-    // 1. Objektum megnyitása és betöltése
+-    struct bpf_object *obj = bpf_object__open_file(objPath.c_str(), NULL);
+-    if (!obj) {
+-        std::cerr << "[BPF] Hiba: Nem sikerült megnyitni az eBPF objektumot!" << std::endl;
+-        return false;
+-    }
++    if (ifIndex == 0) return false;
+ 
+-    if (bpf_object__load(obj)) {
+-        std::cerr << "[BPF] Hiba: Kernel verifikátor elutasította a kódot!" << std::endl;
+-        bpf_object__close(obj);
+-        return false;
+-    }
++    obj_ptr = bpf_object__open_file(objPath.c_str(), NULL);
++    if (!obj_ptr) return false;
+ 
+-    // 2. A program megkeresése (SEC("classifier") a C kódban)
+-    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "venom_router_guard");
+-    if (!prog) {
+-        std::cerr << "[BPF] Hiba: Nem található 'venom_router_guard' program!" << std::endl;
+-        bpf_object__close(obj);
++    if (bpf_object__load(obj_ptr)) {
++        bpf_object__close(obj_ptr);
++        obj_ptr = nullptr;
+         return false;
+     }
+ 
+-    // 3. Rácsatolás az interfészre (TC/XDP helyett most a legegyszerűbb módon)
+-    // Megjegyzés: Éles környezetben itt libbpf 'bpf_set_link_xdp_fd' vagy 'tc' hívás kell
++    struct bpf_program *prog = bpf_object__find_program_by_name(obj_ptr, "venom_router_guard");
+     int prog_fd = bpf_program__fd(prog);
+-    if (prog_fd < 0) {
+-        std::cerr << "[BPF] Hiba: Érvénytelen program FD!" << std::endl;
++
++    if (bpf_xdp_attach(ifIndex, prog_fd, 0, NULL) < 0) {
++        bpf_object__close(obj_ptr);
++        obj_ptr = nullptr;
+         return false;
+     }
+ 
+-    std::cout << "[BPF] Pajzs élesítve a kernelben. Forrás: " << objPath << std::endl;
+-    std::cout << "[BPF] Interfész: " << interfaceName << " (Index: " << ifIndex << ") FD: " << prog_fd << std::endl;
+-    
+     attached = true;
+     return true;
+ }
+ 
++BpfStats BpfLoader::getStats() {
++    BpfStats stats = {0, 0};
++    if (!attached || !obj_ptr) return stats;
++
++    int map_fd = bpf_object__find_map_fd_by_name(obj_ptr, "stats_map");
++    if (map_fd >= 0) {
++        uint32_t key_total = 0;
++        uint32_t key_dropped = 1;
++        bpf_map_lookup_elem(map_fd, &key_total, &stats.total_packets);
++        bpf_map_lookup_elem(map_fd, &key_dropped, &stats.dropped_packets);
++    }
++    return stats;
++}
++
++bool BpfLoader::blockIP(const std::string& ip_str) {
++    if (!attached || !obj_ptr) return false;
++    uint32_t ip;
++    inet_pton(AF_INET, ip_str.c_str(), &ip);
++    int map_fd = bpf_object__find_map_fd_by_name(obj_ptr, "blacklist_map");
++    uint8_t value = 1;
++    return bpf_map_update_elem(map_fd, &ip, &value, BPF_ANY) == 0;
++}
++
+ void BpfLoader::detach() {
+-    if (attached) {
+-        // Leakasztjuk a programot az interfészről
+-        // XDP esetén: bpf_set_link_xdp_fd(ifIndex, -1, 0);
+-        
+-        // Mivel mi most a libbpf high-level API-ját használjuk:
+-        std::cout << "\n[BPF] Pajzs eltávolítása a kernelből (" << interfaceName << ")..." << std::endl;
+-        
+-        // A bpf_object bezárása felszabadítja a kernel erőforrásokat
+-        // Ha elmentettük az obj pointert a class-ban, itt hívjuk meg a close-t.
+-        
++    if (attached && obj_ptr) {
++        bpf_xdp_detach(ifIndex, 0, NULL);
++        bpf_object__close(obj_ptr);
++        obj_ptr = nullptr;
+         attached = false;
+-        std::cout << "[BPF] Kernel clean-up kész. Viszlát!" << std::endl;
+     }
+ }
+ 
+-}
++} // namespace Venom::Core
+diff --git a/debian_skeleton/src/core/ebpf/venom_shield.bpf.c b/debian_skeleton/src/core/ebpf/venom_shield.bpf.c
+index a034a4c..9bad149 100644
+--- a/debian_skeleton/src/core/ebpf/venom_shield.bpf.c
++++ b/debian_skeleton/src/core/ebpf/venom_shield.bpf.c
+@@ -1,38 +1,53 @@
+ #include <linux/bpf.h>
+ #include <linux/if_ether.h>
+-#include <linux/pkt_cls.h>
++#include <linux/ip.h>
+ #include <bpf/bpf_helpers.h>
+-
+-/* * White-Venom eBPF Shield v1.0
+- * Kernel-level Router Advertisement Filter
+- */
++#include <linux/in.h>
+ 
+ struct {
+     __uint(type, BPF_MAP_TYPE_HASH);
+-    __uint(max_entries, 16);
+-    __type(key, unsigned char[6]); // Router MAC address
+-    __type(value, __u32);          // Trust flag
+-} allowed_routers SEC(".maps");
+-
+-SEC("classifier")
+-int venom_router_guard(struct __sk_buff *skb) {
+-    void *data_end = (void *)(long)skb->data_end;
+-    void *data = (void *)(long)skb->data;
++    __uint(max_entries, 1024);
++    __type(key, __be32);
++    __type(value, __u8);
++} blacklist_map SEC(".maps");
++
++struct {
++    __uint(type, BPF_MAP_TYPE_ARRAY);
++    __uint(max_entries, 2);
++    __type(key, __u32);
++    __type(value, __u64);
++} stats_map SEC(".maps");
++
++static __always_inline void update_stat(__u32 slot) {
++    __u64 *count = bpf_map_lookup_elem(&stats_map, &slot);
++    if (count) {
++        __sync_fetch_and_add(count, 1);
++    }
++}
++
++SEC("xdp")
++int venom_router_guard(struct xdp_md *ctx) {
++    void *data_end = (void *)(long)ctx->data_end;
++    void *data = (void *)(long)ctx->data;
++
+     struct ethhdr *eth = data;
++    if ((void *)(eth + 1) > data_end) return XDP_PASS;
+ 
+-    // Boundary check a kernel verifikátornak
+-    if (data + sizeof(*eth) > data_end)
+-        return TC_ACT_OK;
++    if (eth->h_proto == __constant_htons(ETH_P_IP)) {
++        struct iphdr *iph = (void *)(eth + 1);
++        if ((void *)(iph + 1) > data_end) return XDP_PASS;
+ 
+-    // Itt nézzük meg, hogy a forrás MAC benne van-e a fehérlistában
+-    __u32 *trusted = bpf_map_lookup_elem(&allowed_routers, eth->h_source);
++        update_stat(0); // Összes csomag (Total)
+ 
+-    if (trusted) {
+-        return TC_ACT_OK; // Ismert barát, mehet tovább
++        __u32 src_ip = iph->saddr;
++        __u8 *blocked = bpf_map_lookup_elem(&blacklist_map, &src_ip);
++        
++        if (blocked && *blocked == 1) {
++            update_stat(1); // Eldobott csomag (Flushed)
++            return XDP_DROP;
++        }
+     }
+-
+-    // Ha nem ismerjük, az eseményt a C++ motor fogja elkapni a Raw Socketen
+-    return TC_ACT_OK; 
++    return XDP_PASS;
+ }
+ 
+ char _license[] SEC("license") = "GPL";
+diff --git a/debian_skeleton/src/main.cpp b/debian_skeleton/src/main.cpp
+index 405fdb1..989998a 100644
+--- a/debian_skeleton/src/main.cpp
++++ b/debian_skeleton/src/main.cpp
+@@ -1,5 +1,5 @@
+ // © 2026 Beatrix Zselezny. All rights reserved.
+-// White-Venom Engine v2.2-stable (eBPF Hardened)
++// White-Venom Engine v3.0-stable (Dashboard Edition)
+ 
+ #include <iostream>
+ #include <string>
+@@ -8,6 +8,8 @@
+ #include <thread>
+ #include <chrono>
+ #include <iomanip>
++#include <vector>
++#include <cmath>
+ 
+ #include "core/VenomBus.hpp"
+ #include "core/Scheduler.hpp"
+@@ -19,12 +21,27 @@
+ std::atomic<bool> keepRunning{true};
+ rxcpp::composite_subscription engine_lifetime;
+ 
++// Vizuális segédfüggvények (ANSI)
++void clearScreen() { std::cout << "\033[2J\033[H"; }
++void setGreen() { std::cout << "\033[1;32m"; }
++void setRed() { std::cout << "\033[1;31m"; }
++void resetColor() { std::cout << "\033[0m"; }
++
+ void signalHandler(int signum) {
+-    std::cout << "\n[Signal] Megszakítás (" << signum << ")..." << std::endl;
++    (void)signum; // Elnémítjuk a warningot: tudjuk, hogy itt van, de nem használjuk
+     keepRunning = false;
+     if (engine_lifetime.is_subscribed()) engine_lifetime.unsubscribe();
+ }
+ 
++// A rate paramétert is elnémítjuk, amíg nem használjuk a szívverés ütemezéséhez
++std::string getHeartbeat(int tick, int rate) {
++    (void)rate; 
++    std::string frame = "---";
++    if (tick % 4 == 0) frame = "-^-";
++    else if (tick % 4 == 1) frame = "/ \\";
++    return frame;
++}
++
+ int main(int argc, char* argv[]) {
+     bool serviceMode = false;
+     for (int i = 1; i < argc; ++i) {
+@@ -34,72 +51,80 @@ int main(int argc, char* argv[]) {
+     std::signal(SIGINT, signalHandler);
+     std::signal(SIGTERM, signalHandler);
+ 
+-    // --- Core Inicializáció ---
+     Venom::Core::Scheduler scheduler;
+     Venom::Core::VenomBus bus;
+-    
+-    // eBPF Vezérlő példányosítása
+     Venom::Core::BpfLoader bpfLoader;
+-
+-    // --- Modulok ---
+     Venom::Modules::FilesystemModule fsModule(bus);
+     Venom::Core::SocketProbe socketProbe(bus, 8888, Venom::Core::LogLevel::SECURITY_ONLY);
+ 
+     try {
+-        // 1. Fázis: Alapvető biztonsági politikák
+         {
+             Venom::Modules::InitSecurityModule initMod;
+             initMod.execute();
+         }
+ 
+-        // 2. Fázis: eBPF Pajzs betöltése a wlo1 kártyára
+-        std::cout << "[Kernel] Deploying eBPF Shield to wlo1..." << std::endl;
+         if (!bpfLoader.deploy("obj/venom_shield.bpf.o", "wlo1")) {
+-            std::cerr << "[WARNING] eBPF Shield deployment failed! Running in user-space mode only." << std::endl;
+-        } else {
+-            std::cout << "[Kernel] eBPF Shield is ACTIVE and filtering on wlo1." << std::endl;
++            // Deploy hiba kezelve
+         }
+ 
+-        // 3. Fázis: Reaktív motor indítása
+         scheduler.start(bus);
+         bus.startReactive(engine_lifetime, scheduler);
+-
+-        // 4. Fázis: Statikus audit
+         fsModule.performStaticAudit();
+ 
+         if (serviceMode) {
+-            std::cout << "[Mode] Service Mode active. Monitoring wlo1 & Filesystem..." << std::endl;
+             fsModule.startMonitoring();
+             socketProbe.start();
+ 
++            int frameCounter = 0;
+             while (keepRunning && engine_lifetime.is_subscribed()) {
+-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+-                
+                 auto snap = bus.getTelemetrySnapshot();
++                auto bpfStats = bpfLoader.getStats();
++
++                clearScreen();
++                setGreen();
++                std::cout << "#########################################################" << std::endl;
++                std::cout << "#  WHITE VENOM v3.0 - CLI Dashboard          [ RUNNING ] #" << std::endl;
++                std::cout << "#########################################################" << std::endl;
++                
++                std::cout << "\n TOTAL FLUSHED BITS (Kernel Drop): ";
++                setRed();
++                std::cout << bpfStats.dropped_packets << " PKTS" << std::endl;
++                setGreen();
++
++                std::cout << "\n SCHEDULER DOMAINS:" << std::endl;
++                std::cout << " [ BUS Q: " << std::setw(3) << snap.queue_current << " ]  " 
++                          << " [ LOAD: " << std::fixed << std::setprecision(2) << snap.current_system_load << " ]" << std::endl;
++
++                std::cout << "\n CORE TELEMETRY:" << std::endl;
++                std::cout << " > Accepted: " << snap.accepted << std::endl;
++                std::cout << " > Filtered: " << snap.null_routed << std::endl;
++                
++                // Heartbeat animáció
++                std::cout << "\n HEARTBEAT: [ " << getHeartbeat(frameCounter++, 0) << " ]" << std::endl;
+                 
+-                // Reaktív státusz kijelzés
+-                std::cout << "\r[Status] Q: " << std::setw(3) << snap.queue_current 
+-                          << " | OK: " << snap.accepted 
+-                          << " | WC: " << snap.null_routed 
+-                          << " | Load: " << std::fixed << std::setprecision(2) << snap.current_system_load 
+-                          << " | eBPF: " << (bpfLoader.isActive() ? "ON" : "OFF")
+-                          << std::flush;
++                // Egyszerű "grafikon" imitáció
++                std::cout << "\n TRAFFIC PROFILE:" << std::endl;
++                int barLen = (int)(snap.current_system_load * 20) % 40;
++                std::cout << " [";
++                for(int i=0; i<40; ++i) std::cout << (i < barLen ? "|" : ".");
++                std::cout << "]" << std::endl;
++
++                std::cout << "\n---------------------------------------------------------" << std::endl;
++                std::cout << " eBPF Shield: " << (bpfLoader.isActive() ? "[ ACTIVE ON WLO1 ]" : "[ OFF ]") << std::endl;
++                resetColor();
++
++                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+             }
+ 
+             socketProbe.stop();
+             fsModule.stopMonitoring();
+-            bpfLoader.detach(); // Leállításkor lekapcsoljuk a pajzsot
++            bpfLoader.detach();
+         }
+-
+     } catch (const std::exception& e) {
+         std::cerr << "\n[CRITICAL] Engine hiba: " << e.what() << std::endl;
+-        engine_lifetime.unsubscribe();
+         bpfLoader.detach();
+     }
+ 
+-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+     scheduler.stop();
+-    std::cout << "\n[Shutdown] White-Venom Engine gracefully stopped." << std::endl;
+-
+     return 0;
+ }

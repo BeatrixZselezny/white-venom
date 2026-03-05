@@ -1,0 +1,158 @@
+Ez, amit leírsz, több szempontból is figyelemre méltó. Már elsőre látszik, hogy **valami mélyebb rendszer- vagy jogosultsági szinten van megcsúszva a PostgreSQL-konfigurációd**, de nem úgy, hogy „elromlott”, inkább mintha egy *nagyon szigorú* biztonsági policy lenne érvényben — akár root, AppArmor/SELinux, vagy explicit pg_hba.conf és ownership problémák.
+
+Vizsgáljuk meg gyorsan a **valószínű okokat**, és mit lehet tenni.
+
+---
+
+### 🔍 Összefoglalva a tünet:
+
+* **PostgreSQL csak `postgres` felhasználóként hajlandó engedni bármilyen hozzáférést.**
+* Más Linux user hiába van (akár saját neveden létrehozva), **nem tud kapcsolódni**, nem kap jogosultságot, nem lát adatbázist, stb.
+* Root se tudja őt hozzáadni (`psql`-hez `postgres` kivételével senki nem fér hozzá).
+* Otthon és itt is *ugyanez* a tapasztalat — tehát akár a telepítési scripted, vagy egy konzervált config viselkedése lehet az oka.
+
+---
+
+### 🔐 Lehetséges okok + javítási ötletek:
+
+#### 1. **A `pg_hba.conf` fájl kizárólag a `postgres` Unix usert engedi be**
+
+A PostgreSQL hitelesítési fájlja:
+📍 `/etc/postgresql/13/main/pg_hba.conf` (verziófüggő, pl. 14, 15 stb.)
+
+Példa egy szigorú, csak `postgres` felhasználót beengedő beállításra:
+
+```conf
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+local   all             postgres                                peer
+```
+
+Ez azt mondja:
+
+* *local* kapcsolat (Unix socket)
+* csak `postgres` felhasználó
+* és csak akkor, ha a rendszerfelhasználó is `postgres` (peer authentication)
+
+📌 **Ezért nem engedi be a saját useredet**.
+
+✔ **Megoldás**: Add hozzá a saját Linux useredet is:
+
+```conf
+# engedjük be a saját usered, pl. 'beatrix' peer módszerrel
+local   all             beatrix                                 peer
+```
+
+Majd reload:
+
+```bash
+sudo systemctl reload postgresql
+```
+
+> Ha több user kell, vagy jelszavas login, akkor `md5` vagy `scram-sha-256` módszerre kell váltani — de peer jó helyi gépre.
+
+---
+
+#### 2. **Nem létezik adatbázis-user a neveden**
+
+A PostgreSQL-ben *külön kell léteznie* egy `ROLE`-nak (user-nek), még ha a Linux usered létezik is.
+
+✔ Ellenőrizd, létezik-e a neved PostgreSQL-ben:
+
+```bash
+sudo -u postgres psql -c '\du'
+```
+
+Ha nincs ott, hozd létre:
+
+```bash
+sudo -u postgres createuser --interactive
+# vagy:
+sudo -u postgres createuser beatrix --createdb
+```
+
+> Ekkor a Linux `beatrix` userként, ha a `pg_hba.conf` engedi, már csatlakozhatsz is:
+
+```bash
+psql -U beatrix -d mydb
+```
+
+---
+
+#### 3. **Az adatbázis nem létezik a user nevével**
+
+A `psql` parancs, ha nincs megadva adatbázisnév, akkor azonos nevű adatbázisba próbál csatlakozni, mint a user.
+
+✔ Hozd létre, ha még nincs:
+
+```bash
+sudo -u postgres createdb beatrix
+```
+
+---
+
+#### 4. **AppArmor vagy SELinux lockolja a hozzáférést**
+
+Ha AppArmor vagy SELinux aktív, és a `postgres` binárisra vagy socketre túl szigorú szabály van, **lehet, hogy csak a `postgres` usernek enged kommunikációt** a Unix sockethez vagy fájlhoz.
+
+✔ Nézd meg AppArmor-profil van-e aktív:
+
+```bash
+sudo aa-status
+```
+
+Ha PostgreSQL `enforce` módban fut, akkor `audit.log`-ban nézd a megtagadott hozzáféréseket:
+
+```bash
+sudo ausearch -m avc -ts today
+```
+
+Ha ilyen van, ideiglenesen `complain` módra válthatsz:
+
+```bash
+sudo aa-complain /usr/lib/postgresql/15/bin/postgres
+```
+
+(Szedd le a pontos bin elérési utat!)
+
+---
+
+### 📦 Extra tipp: indulás saját userrel (`psql`)
+
+Ha minden stimmel:
+
+```bash
+# ha user és db létezik, és peer engedélyezve:
+psql
+# vagy explicit:
+psql -U beatrix -d beatrix
+```
+
+Ha hibát dob:
+
+```bash
+psql: FATAL: role "beatrix" does not exist
+```
+
+Akkor nincs adatbázis-role — lásd 2. pont.
+
+---
+
+### 🛡️ Mit csinálj most?
+
+1. Nézd meg a `pg_hba.conf` tartalmát. Engedi a te useredet?
+2. Nézd meg van-e PostgreSQL-user a neveden.
+3. Nézd meg létezik-e azonos nevű adatbázis.
+4. Ellenőrizd az AppArmor/SELinux állapotot.
+
+Ha mindhárom stimmel, akkor menni fog a saját useredről is minden.
+
+---
+
+Ha akarod, átnézhetem veled lépésről lépésre — vagy dobhatod a `pg_hba.conf`-od ide, megnézem, mit enged, és gyorsan javítjuk.
+
+---
+
+🎁 **Végszó:**
+Nagyon nem vagy egyedül ezzel — sokan gondolják, hogy „hát Linux alatt a rendszeruserednek működnie kell”, de a PostgreSQL teljesen külön saját jogkörben és hitelesítési világban él, amit **szigorúan explicit módon kell konfigurálni**. De ha egyszer összeraktad jól, utána már minden tiszta és kontrollált lesz.
+
+Ha szeretnél, csinálok neked egy sablont saját userrel, `peer` módszerrel, teljesen AppArmor kompatibilisen is.

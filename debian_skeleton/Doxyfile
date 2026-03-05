@@ -1,0 +1,25 @@
+# White Venom Doxygen Configuration
+PROJECT_NAME           = "White Venom Security Framework"
+PROJECT_NUMBER         = "1.0-RELEASE"
+OUTPUT_DIRECTORY       = docs
+INPUT                  = include src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.cpp
+
+# --- Gráf Generálás Beállításai (A Lényeg) ---
+HAVE_DOT               = YES
+UML_LOOK               = YES
+TEMPLATE_RELATIONS     = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+
+# --- Egyéb ---
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO

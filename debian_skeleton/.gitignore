@@ -1,0 +1,11 @@
+# Ignore binaries and objects
+bin/
+obj/
+*.o
+*.a
+# Ignore logs and temp files
+buggy.txt
+*.log
+docs/html/
+obj/
+bin/

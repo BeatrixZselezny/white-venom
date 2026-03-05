@@ -1,0 +1,72 @@
+
+
+
+🛡️ Zero Trust Security Audit
+Merge pull request #4 from BeatrixZselezny/dependabot/maven/org.apach… #19
+
+All jobs
+
+Run details
+
+Annotations
+1 error
+vulnerability-scan
+failed Feb 5, 2026 in 23s
+3s
+1s
+15s
+2026-02-05T14:17:57Z	INFO	[secret] Please see https://trivy.dev/docs/v0.68/guide/scanner/secret#recommendation for faster secret detection
+2026-02-05T14:18:01Z	WARN	[pom] Dependency version cannot be determined. Child dependencies will not be found.	details="https://trivy.dev/docs/v0.68/guide/coverage/language/java#empty-dependency-version"
+2026-02-05T14:18:01Z	INFO	Number of language-specific files	num=3
+2026-02-05T14:18:01Z	INFO	[pom] Detecting vulnerabilities...
+
+📣 Notices:
+  - Version 0.69.1 of Trivy is now available, current version is 0.68.1
+
+
+To suppress version checks, run Trivy scans with the --skip-version-check flag
+
+Report Summary
+
+┌───────────────────────┬──────┬─────────────────┬─────────┐
+│        Target         │ Type │ Vulnerabilities │ Secrets │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ patchy-audit/pom.xml  │ pom  │        0        │    -    │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ patchy-parent/pom.xml │ pom  │        0        │    -    │
+├───────────────────────┼──────┼─────────────────┼─────────┤
+│ pom.xml               │ pom  │        1        │    -    │
+└───────────────────────┴──────┴───────��─────────┴─────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+
+For OSS Maintainers: VEX Notice
+--------------------------------
+If you're an OSS maintainer and Trivy has detected vulnerabilities in your project that you believe are not actually exploitable, consider issuing a VEX (Vulnerability Exploitability eXchange) statement.
+VEX allows you to communicate the actual status of vulnerabilities in your project, improving security transparency and reducing false positives for your users.
+Learn more and start using VEX: https://trivy.dev/docs/v0.68/guide/supply-chain/vex/repo#publishing-vex-documents
+
+To disable this notice, set the TRIVY_DISABLE_VEX_NOTICE environment variable.
+
+
+pom.xml (pom)
+=============
+Total: 1 (HIGH: 1, CRITICAL: 0)
+
+┌──────────────────────────────────────┬────────────────┬──────────┬────────┬───────────────────┬───────────────┬────────────────────────────────────────────────────────┐
+│               Library                │ Vulnerability  │ Severity │ Status │ Installed Version │ Fixed Version │                         Title                          │
+├──────────────────────────────────────┼────────────────┼──────────┼────────┼───────────────────┼───────────────┼────────────────────────────────────────────────────────┤
+│ org.springframework.boot:spring-boot │ CVE-2025-22235 │ HIGH     │ fixed  │ 3.4.2             │ 3.3.11, 3.4.5 │ org.springframework.boot/spring-boot: Spring Boot      │
+│                                      │                │          │        │                   │               │ EndpointRequest.to() creates wrong matcher if actuator │
+│                                      │                │          │        │                   │               │ endpoint is not...                                     │
+│                                      │                │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2025-22235             │
+└──────────────────────────────────────┴────────────────┴──────────┴────────┴───────────────────┴───────────────┴────────────────────────────────────────────────────────┘
+Error: Process completed with exit code 1.
+Run rm -f trivy_envs.txt
+  
+0s
+1s
+0s
+

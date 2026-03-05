@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# A values fájl ürítése minden futtatás előtt
+> values
+
+cat /sys/devices/system/cpu/vulnerabilities/l1tf >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/mds >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/spec_store_bypass >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/spectre_v2 >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/gather_data_sampling >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/itlb_multihit >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/meltdown >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/mmio_stale_data >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/retbleed >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/spec_rstack_overflow >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/spectre_v1 >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/tsx_async_abort >> values && \
+cat /sys/devices/system/cpu/vulnerabilities/srbds >> values
+
+# L1 terminal error
+
+#grub-editenv - set "$(grub-editenv - list | grep kernelopts) l1tf=full,force"
+#grub-editenv - set "$(grub-editenv - list | grep kernelopts) smt=full,nosmt"
+
+
+
