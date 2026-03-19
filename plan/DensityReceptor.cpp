@@ -1,0 +1,1 @@
+auto s=raw_noise_stream.map([](const Window& w){return std::make_pair(w,calculate_shannon_entropy(w.data)/w.size);}).filter([this](const auto& p){return p.second>0.85;}).observe_on(observe_on_new_thread()).subscribe([this](const auto& p){this->private_harvester.extract(p.first.data);});
