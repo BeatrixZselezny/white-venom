@@ -4,7 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include "telemetry/TelemetrySnapshot.hpp"
-#include "TimeCubeTypes.hpp" // FIX: Közvetlenül az include-ban van!
+#include "TimeCubeTypes.hpp" 
 
 namespace Venom::Core {
 
@@ -18,14 +18,16 @@ namespace Venom::Core {
         std::atomic<BusState> state{BusState::UP};
         std::atomic<SecurityProfile> current_profile{SecurityProfile::NORMAL};
 
+        // --- ÚJ: A MAJOM-VÁM MEZŐI (Ezek hiányoztak a fordításhoz) ---
+        std::atomic<uint64_t> entropy_harvested_total{0}; 
+        std::atomic<double> current_shannon_index{0.0};   
+
         std::chrono::steady_clock::time_point window_start;
 
         BusTelemetry();
         void reset_window();
         
-        // Ez kell a metabolikus méréshez
         SystemMetabolism get_metabolism() const;
-        
         TelemetrySnapshot snapshot() const;
     };
 

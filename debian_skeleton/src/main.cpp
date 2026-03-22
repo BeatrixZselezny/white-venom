@@ -59,13 +59,11 @@ bool isValidMac(const std::string& mac) {
     return std::regex_match(mac, pattern);
 }
 
-// ÚJ, PERMANENS LOGIKA: Megjegyzi a MAC-et bootolás után is
 void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
     const std::string configPath = "/etc/venom";
     const std::string configFile = configPath + "/router.identity";
     std::string mac_input;
 
-    // 1. Próbáljuk beolvasni a létező fájlt
     if (fs::exists(configFile)) {
         std::ifstream ifs(configFile);
         if (ifs >> mac_input && isValidMac(mac_input)) {
@@ -77,7 +75,6 @@ void secureSetupRouter(Venom::Core::BpfLoader& bpfLoader) {
         }
     }
 
-    // 2. Ha nincs meg, vagy hibás, csak akkor kérünk újat
     if (!fs::exists(configPath)) {
         fs::create_directories(configPath);
         fs::permissions(configPath, fs::perms::owner_all, fs::perm_options::replace);
@@ -171,16 +168,33 @@ int main(int argc, char* argv[]) {
                 clearScreen();
                 drawHeader();
                 
+                // --- KERNEL DROPS ---
                 std::cout << "\n 💀 "; matrixRed();
                 std::cout << "TOTAL KERNEL DROPS: ";
                 boldWhite();
                 std::cout << bpfStats.dropped_packets << " PKTS" << std::endl;
                 resetColor();
 
+                // --- XOR-CAGE PROFIT SECTION (Új logika) ---
+                std::cout << " 💰 "; neonGreen();
+                std::cout << "ENTROPY HARVESTED: ";
+                boldWhite();
+                // Megjelenítjük a leszüretelt "aranyat" MB-ban
+                std::cout << std::fixed << std::setprecision(2) << (snap.entropy_harvested_bytes / 1048576.0) << " MB GOLD" << std::endl;
+                resetColor();
+
                 std::cout << "\n 📡 "; cyberCyan();
                 std::cout << "CORE TELEMETRY STREAM:" << std::endl;
                 stealthGray();
                 std::cout << "  > ACCEPTED_NODES: "; neonGreen(); std::cout << snap.accepted << std::endl;
+                
+                // --- CAGE METABOLISM (Új logika) ---
+                stealthGray();
+                std::cout << "  > CAGE METABOLISM: "; 
+                // Ha pörög a daráló (load > 1.2), váltson pirosra a metabolizmus
+                if(snap.current_system_load > 1.2) matrixRed(); else neonGreen();
+                std::cout << std::fixed << std::setprecision(2) << snap.current_system_load << "x" << std::endl;
+                
                 stealthGray();
                 std::cout << "  > FILTERED_ENTRY: "; matrixRed(); std::cout << snap.null_routed << std::endl;
                 resetColor();
