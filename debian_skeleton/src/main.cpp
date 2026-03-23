@@ -152,6 +152,7 @@ int main(int argc, char* argv[]) {
             socketProbe.start();
             int frameCounter = 0;
             uint64_t last_filtered = 0;
+            uint64_t last_harvested_bytes = 0; // Tresor szinkronhoz
 
             while (keepRunning && engine_lifetime.is_subscribed()) {
                 auto snap = bus.getTelemetrySnapshot();
@@ -165,6 +166,28 @@ int main(int argc, char* argv[]) {
                     last_filtered = snap.null_routed;
                 }
 
+                // --- TRESOR LOGIKA: AZ ARANY BEFALAZÁSA ---
+                if (snap.entropy_harvested_bytes > last_harvested_bytes) {
+                    std::string tresorPath = "/etc/venom/harvest.gold";
+                    
+                    // 1. Kinyitjuk a széfet (feloldjuk az immutable bitet)
+                    if (fs::exists(tresorPath)) {
+                        system(("chattr -i " + tresorPath).c_str());
+                    }
+
+                    // 2. Belepakoljuk az új zsákmányt
+                    std::ofstream tresorFile(tresorPath, std::ios::app | std::ios::binary);
+                    if (tresorFile.is_open()) {
+                        tresorFile << "[V-GOLD:" << snap.total << ":" << snap.shannon_index_avg << "]";
+                        tresorFile.flush();
+                        tresorFile.close();
+                        
+                        // 3. RÁZÁRJUK A LAKATOT (Immutable lakat a kernelnek)
+                        system(("chattr +i " + tresorPath).c_str());
+                        last_harvested_bytes = snap.entropy_harvested_bytes;
+                    }
+                }
+
                 clearScreen();
                 drawHeader();
                 
@@ -175,12 +198,17 @@ int main(int argc, char* argv[]) {
                 std::cout << bpfStats.dropped_packets << " PKTS" << std::endl;
                 resetColor();
 
-                // --- XOR-CAGE PROFIT SECTION (Új logika) ---
+                // --- XOR-CAGE TRESOR SECTION ---
                 std::cout << " 💰 "; neonGreen();
                 std::cout << "ENTROPY HARVESTED: ";
                 boldWhite();
-                // Megjelenítjük a leszüretelt "aranyat" MB-ban
-                std::cout << std::fixed << std::setprecision(2) << (snap.entropy_harvested_bytes / 1048576.0) << " MB GOLD" << std::endl;
+                std::cout << std::fixed << std::setprecision(2) << (snap.entropy_harvested_bytes / 1048576.0) << " MB GOLD";
+                
+                // Ha a Tresor le van lakatolva, jelezzük
+                if (fs::exists("/etc/venom/harvest.gold")) {
+                    cyberCyan(); std::cout << " [TRESOR LOCKED]"; 
+                }
+                std::cout << std::endl;
                 resetColor();
 
                 std::cout << "\n 📡 "; cyberCyan();
@@ -188,10 +216,9 @@ int main(int argc, char* argv[]) {
                 stealthGray();
                 std::cout << "  > ACCEPTED_NODES: "; neonGreen(); std::cout << snap.accepted << std::endl;
                 
-                // --- CAGE METABOLISM (Új logika) ---
+                // --- CAGE METABOLISM ---
                 stealthGray();
                 std::cout << "  > CAGE METABOLISM: "; 
-                // Ha pörög a daráló (load > 1.2), váltson pirosra a metabolizmus
                 if(snap.current_system_load > 1.2) matrixRed(); else neonGreen();
                 std::cout << std::fixed << std::setprecision(2) << snap.current_system_load << "x" << std::endl;
                 
